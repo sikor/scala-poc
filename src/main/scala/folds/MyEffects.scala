@@ -8,7 +8,9 @@ import folds.Routing.{Route, RouteFactory, RouteFold}
   */
 object MyEffects {
 
-  trait CoapFold extends BasicEffectsFoldTemplate[CoapEffects] with RouteFold[CoapEffects]
+  trait CoapFold extends BasicEffectsFoldTemplate[CoapFold] with RouteFold {
+    def fldr: CoapFold = this
+  }
 
   trait CoapEffects[V] extends BasicEffectsTemplate[CoapFold, CoapEffects, V] {
     override protected def self: CoapEffects[V] = this
@@ -21,21 +23,15 @@ object MyEffects {
       override def fold(folder: CoapFold): V = folder.onPure(pure)
     }
 
-    implicit override def bind[V](p: Bind[CoapEffects, V]): CoapEffects[V] = new CoapEffects[V] {
+
+    implicit override def bind[S, V](p: Bind[CoapEffects, S, CoapEffects[V]]): CoapEffects[V] = new CoapEffects[V] {
       override def fold(folder: CoapFold): V = folder.onBind(p)
     }
 
-    implicit override def route[V](r: Route[V]): CoapEffects[V] = new CoapEffects[V] {
+    implicit override def route[V](r: Route[CoapEffects, V]): CoapEffects[V] = new CoapEffects[V] {
       override def fold(folder: CoapFold): V = folder.onRoute(r)
     }
   }
 
-  object Execute extends CoapFold {
-    override def onPure[V](pure: Pure[V]): V = ???
-
-    override def onBind[V](bind: Bind[CoapEffects, V]): V = ???
-
-    override def onRoute[V](r: Route[V]): V = ???
-  }
 
 }

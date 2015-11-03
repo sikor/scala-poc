@@ -8,35 +8,30 @@ object Effects {
 
   final case class Pure[V](value: V)
 
-  object Bind {
-    def apply[C[_], P, V](source: C[P], f: P => C[V]): Bind[C, V] = BindImpl(source, f)
-  }
-
-  sealed trait Bind[C[_], V] {
-    type Source
-    val source: C[Source]
-    val f: Source => C[V]
-  }
-
-  final case class BindImpl[C[_], S, V](source: C[S], f: S => C[V]) extends Bind[C, V] {
+  final case class Bind[ES[_], S, EV](source: ES[S], f: S => EV) {
     type Source = S
+    val src: ES[Source] = source
+    val fun: Source => EV = f
   }
 
-  trait BasicEffectsFoldTemplate[E[_]] {
-    def onPure[V](pure: Pure[V]): V
+  trait BasicEffectsFoldTemplate[F] {
+    def onPure[V](pure: Pure[V]): V = pure.value
 
-    def onBind[V](bind: Bind[E, V]): V
+    def onBind[ES[_] <: Effect[F, S], S, V, EV <: Effect[F, V]](bind: Bind[ES, S, EV]): V =
+      bind.f(bind.source.fold(fldr)).fold(fldr)
+
+    def fldr: F
   }
 
-  trait EffectsTemplate[F, V] {
+  trait Effect[F, V] {
     def fold(folder: F): V
   }
 
-  trait BasicEffectsTemplate[F, E[_], V] extends EffectsTemplate[F, V] {
+  trait BasicEffectsTemplate[F, E[_], V] extends Effect[F, V] {
 
     def map[R](f: V => R): E[R] = flatMap(v => factory.pure(Pure(f(v))))
 
-    def flatMap[R](f: V => E[R]): E[R] = factory.bind(BindImpl(self, f))
+    def flatMap[R](f: V => E[R]): E[R] = factory.bind(Bind(self, f))
 
     def factory: BasicEffectsTemplateFactory[E]
 
@@ -46,10 +41,12 @@ object Effects {
   trait BasicEffectsTemplateFactory[E[_]] {
     def pure[V](pure: Pure[V]): E[V]
 
-    def bind[V](p: Bind[E, V]): E[V]
+    def bind[S, V](p: Bind[E, S, E[V]]): E[V]
   }
 
-  trait BasicEffectsFold extends BasicEffectsFoldTemplate[BasicEffects]
+  trait BasicEffectsFold extends BasicEffectsFoldTemplate[BasicEffectsFold]{
+    override def fldr = this
+  }
 
   trait BasicEffects[V] extends BasicEffectsTemplate[BasicEffectsFold, BasicEffects, V] {
     override protected def self = this
@@ -62,18 +59,14 @@ object Effects {
       override def fold(folder: BasicEffectsFold): V = folder.onPure(pure)
     }
 
-    implicit def bind[V](b: Bind[BasicEffects, V]): BasicEffects[V] = new BasicEffects[V] {
-      override def fold(folder: BasicEffectsFold): V = folder.onBind(b)
+    implicit def bind[S, V](b: Bind[BasicEffects, S, BasicEffects[V]]): BasicEffects[V] = new BasicEffects[V] {
+      override def fold(folder: BasicEffectsFold): V = folder.onBind[BasicEffects, S, V, BasicEffects[V]](b)
     }
   }
 
   object Execute {
 
-    object ExecuteFold extends BasicEffectsFold {
-      override def onPure[V](pure: Pure[V]): V = pure.value
-
-      override def onBind[V](bind: Bind[BasicEffects, V]): V = bind.f(bind.source.fold(ExecuteFold)).fold(ExecuteFold)
-    }
+    object ExecuteFold extends BasicEffectsFold
 
     def example(): Unit = {
       import BasicEffects._
