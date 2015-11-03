@@ -1,11 +1,13 @@
 package objectalgebra
 
+import objectalgebra.CastingTest.LMI
 import objectalgebra.Effects._
-import objectalgebra.Routing.Route
+import shapeless.ops.coproduct.Inject
+import shapeless.{:+:, CNil, Coproduct, Poly1}
 
 /**
- * Created by Paweł Sikora.
- */
+  * Created by Paweł Sikora.
+  */
 trait Effects[E[_]] {
 
   def pure[V](value: V): E[V]
@@ -51,6 +53,14 @@ trait Routing[E[_]] {
   def route[V](operationWithParams: OperationWithParams[_, X forSome {type X[_]}, V]): E[V]
 }
 
+trait Folder[F, V] {
+  def on(element: F): V
+}
+
+
+trait Foldable[F, V] {
+  def fold(folder: Folder[F, V]): V
+}
 
 object Routing {
 
@@ -58,8 +68,67 @@ object Routing {
     def route[V](operationWithParams: OperationWithParams[_, X forSome {type X[_]}, V]): Route[V] = Route(operationWithParams)
   }
 
-  final case class Route[V](operationWithParams: OperationWithParams[_, X forSome {type X[_]}, V])
+  type FoldableRoute[X] = Foldable[Route[X], X]
 
+  object RoutingFoldableInstance extends Routing[FoldableRoute] {
+    override def route[V](operationWithParams: OperationWithParams[_, (X) forSome {type X[_]}, V]): FoldableRoute[V] = Route(operationWithParams)
+  }
+
+  final case class Route[V](operationWithParams: OperationWithParams[_, X forSome {type X[_]}, V]) extends Foldable[Route[V], V] {
+    override def fold(folder: Folder[Route[V], V]): V = folder.on(this)
+  }
+
+}
+
+
+trait Consumer[V, T] {
+  def consume(t: T): V
+}
+
+trait Matchable[T <: Matchable[T]] {
+  def fold[V, C <: Coproduct](consumer: Consumer[V, C])(implicit inj: Inject[C, T])
+}
+
+class LazyMatch extends Matchable[LazyMatch] {
+  //  def fold[V, C <: Coproduct](consumer: Consumer[V, C])(implicit inj: Inject[C, LazyMatch]) = consumer.consume(inj(this))
+
+  override def fold[V, C <: Coproduct](consumer: Consumer[V, C])(implicit inj: Inject[C, LazyMatch]): Unit = consumer.consume(inj(this))
+
+  val otherMatch = new OtherMatchable
+}
+
+class OtherMatchable extends Matchable[OtherMatchable] {
+  //  def fold[V, C <: Coproduct](consumer: Consumer[V, C])(implicit inj: Inject[C, LazyMatch]) = consumer.consume(inj(this))
+
+  override def fold[V, C <: Coproduct](consumer: Consumer[V, C])(implicit inj: Inject[C, OtherMatchable]): Unit = consumer.consume(inj(this))
+
+  val child: Matchable[_] = new LazyMatch
+
+  def children[V](consumer: Consumer[V, Matchable[_]]): V = consumer.consume(child)
+
+}
+
+object DefConsumer extends Consumer[Int, LMI] {
+  override def consume(t: LMI): Int = 10
+}
+
+object MatchablesConsumer extends Consumer[String, Matchable[_]] with Poly1 {
+  override def consume(t: Matchable[_]): String = "It Works"
+
+  implicit def caseLazyMatch = at[LazyMatch](_ => "Ok")
+
+  implicit def caseOther = at[OtherMatchable](om => om.children(this))
+}
+
+object CastingTest {
+  type LMI = String :+: LazyMatch :+: CNil
+  val lm: Matchable[LazyMatch] = new LazyMatch
+  lm.fold(DefConsumer)
+
+  val otherM = new OtherMatchable
+  type Matchables = OtherMatchable :+: LazyMatch :+: CNil
+  val someFromUnion: Matchables = Coproduct[Matchables](otherM)
+  someFromUnion map MatchablesConsumer
 }
 
 object CalcPi extends OperationWithParams[Effects[BasicEffects], BasicEffects, Float] {
