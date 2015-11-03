@@ -1,80 +1,83 @@
 package folds
 
+import shapeless.ops.coproduct.Folder
+
 /**
   * @author Paweł Sikora
   */
 object Effects {
 
-
   final case class Pure[V](value: V)
 
-  final case class Bind[ES[_], S, EV](source: ES[S], f: S => EV) {
+  final case class Bind[E[_], S, V](source: E[S], f: S => E[V]) {
     type Source = S
-    val src: ES[Source] = source
-    val fun: Source => EV = f
+    val src: E[Source] = source
+    val fun: Source => E[V] = f
   }
 
-  trait BasicEffectsFoldTemplate[F] {
+  trait Effect[V] {
+    type Folder
+
+    def fold(folder: Folder): V
+  }
+
+  trait MonadicEffectsFold[E[_]] {
     def onPure[V](pure: Pure[V]): V = pure.value
 
-    def onBind[ES[_] <: Effect[F, S], S, V, EV <: Effect[F, V]](bind: Bind[ES, S, EV]): V =
-      bind.f(bind.source.fold(fldr)).fold(fldr)
+    def onBind[S, V](bind: Bind[E, S, V]): V = fold(bind.f(fold(bind.source)))
 
-    def fldr: F
+    protected def fold[V](effect: E[V]): V
+
   }
 
-  trait Effect[F, V] {
-    def fold(folder: F): V
-  }
-
-  trait BasicEffectsTemplate[F, E[_], V] extends Effect[F, V] {
+  trait MonadicEffect[E[_], V] extends Effect[V] {
 
     def map[R](f: V => R): E[R] = flatMap(v => factory.pure(Pure(f(v))))
 
     def flatMap[R](f: V => E[R]): E[R] = factory.bind(Bind(self, f))
 
-    def factory: BasicEffectsTemplateFactory[E]
+    def factory: MonadicEffectsFactory[E]
 
     protected def self: E[V]
   }
 
-  trait BasicEffectsTemplateFactory[E[_]] {
+  trait MonadicEffectsFactory[E[_]] {
     def pure[V](pure: Pure[V]): E[V]
 
-    def bind[S, V](p: Bind[E, S, E[V]]): E[V]
+    def bind[S, V](p: Bind[E, S, V]): E[V]
   }
 
-  trait BasicEffectsFold extends BasicEffectsFoldTemplate[BasicEffectsFold]{
-    override def fldr = this
+  object BasicEffectsFold extends MonadicEffectsFold[BasicEffect] {
+    override protected def fold[V](effect: BasicEffect[V]): V = effect.fold(BasicEffectsFold)
   }
 
-  trait BasicEffects[V] extends BasicEffectsTemplate[BasicEffectsFold, BasicEffects, V] {
+  trait BasicEffect[V] extends MonadicEffect[BasicEffect, V] {
+    override type Folder = BasicEffectsFold.type
+
     override protected def self = this
 
-    override def factory = BasicEffects
+    override def factory = BasicEffectFactory
   }
 
-  object BasicEffects extends BasicEffectsTemplateFactory[BasicEffects] {
-    implicit def pure[V](pure: Pure[V]): BasicEffects[V] = new BasicEffects[V] {
-      override def fold(folder: BasicEffectsFold): V = folder.onPure(pure)
+  object BasicEffectFactory extends MonadicEffectsFactory[BasicEffect] {
+    implicit def pure[V](pure: Pure[V]): BasicEffect[V] = new BasicEffect[V] {
+      override def fold(folder: BasicEffectsFold.type): V = folder.onPure(pure)
     }
 
-    implicit def bind[S, V](b: Bind[BasicEffects, S, BasicEffects[V]]): BasicEffects[V] = new BasicEffects[V] {
-      override def fold(folder: BasicEffectsFold): V = folder.onBind[BasicEffects, S, V, BasicEffects[V]](b)
+    implicit def bind[S, V](b: Bind[BasicEffect, S, V]): BasicEffect[V] = new BasicEffect[V] {
+      override def fold(folder: BasicEffectsFold.type): V = folder.onBind[S, V](b)
     }
   }
 
   object Execute {
 
-    object ExecuteFold extends BasicEffectsFold
-
     def example(): Unit = {
-      import BasicEffects._
+      import BasicEffectFactory._
       val ex = for {
         v <- Pure(10)
         v2 <- Pure(11)
       } yield v + v2
-      val v = ex.fold(ExecuteFold)
+      val v = ex.fold(BasicEffectsFold)
       println(v)
     }
 

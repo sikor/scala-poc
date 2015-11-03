@@ -37,6 +37,8 @@ object Main {
 
     println(resolve(computation))
     folds.Effects.Execute.example()
+
+    println(folds.MyEffects.example())
   }
 
 

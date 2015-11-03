@@ -6,18 +6,10 @@ package folds
   */
 object Routing {
 
-  trait OperationWithParams[+E[_], V] {
-    def execute: E[V]
+  trait OperationWithParams[+E] {
+    def execute: E
   }
 
-  final case class Route[+E[_], V](operationWithParams: OperationWithParams[E, V])
-
-  trait RouteFold {
-    def onRoute[E[_], V](r: Route[E, V]): V
-  }
-
-  trait RouteFactory[E[_]] {
-    def route[V](r: Route[E, V]): E[V]
-  }
+  final case class Route[+O](operationWithParams: O)
 
 }
