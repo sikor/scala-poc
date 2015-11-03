@@ -1,6 +1,5 @@
 package folds
 
-import folds.Effects.BasicEffects
 
 /**
   * @author Paweł Sikora
@@ -13,8 +12,12 @@ object Routing {
 
   final case class Route[V](operationWithParams: OperationWithParams[_, X forSome {type X[_]}, V])
 
-  trait Rout
+  trait RouteFold[E[_]] {
+    def onRoute[V](r: Route[V]): V
+  }
 
-  trait MyEffectsSubset[V] extends BasicEffects[V]
+  trait RouteFactory[E[_]] {
+    def route[V](r: Route[V]): E[V]
+  }
 
 }
