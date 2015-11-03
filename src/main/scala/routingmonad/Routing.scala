@@ -1,16 +1,16 @@
 package routingmonad
 
 /**
-  * Created by Paweł Sikora.
-  */
-object Routing {
+ * Created by Paweł Sikora.
+ */
+trait Routing extends Effects {
 
   trait OperationWithParams[V] {
-    def execute: V
+    def execute: Eff[V]
   }
 
-  def route[O <: OperationWithParams[V], V](operationWithParams: O): Route[V] = Route(operationWithParams)
+  def route[V](operationWithParams: OperationWithParams[V]): Route[V] = Route(operationWithParams)
 
-  case class Route[V] private[Routing](operationWithParams: OperationWithParams[V]) extends Eff[V]
+  final case class Route[V](operationWithParams: OperationWithParams[V]) extends Eff[V]
 
 }

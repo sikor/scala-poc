@@ -6,6 +6,7 @@ lazy val routingMonad = (project in file(".")).settings(
   version := "1.0",
   scalaVersion := "2.11.7",
   libraryDependencies ++= Seq(
-    "com.chuusai" %% "shapeless" % "2.2.5"
+    "com.chuusai" %% "shapeless" % "2.2.5",
+    "org.typelevel" % "scala-reflect" % "2.11.7"
   )
 )
