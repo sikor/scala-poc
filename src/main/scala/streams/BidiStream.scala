@@ -188,6 +188,19 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     }
 
 
+    private def ifUnlocked(msg: Msg)(): Future[Ack] = {
+      val ackFut = try {
+        val result = processingFunction(msg)
+        processResult(result)
+      } catch {
+        case NonFatal(e) =>
+          onConsumerFinished(e)
+          Future.failed(e)
+      }
+      unlockState()
+      ackFut
+    }
+
     @tailrec
     final override def onNext(msg: Msg): Future[Ack] = {
       val seenState = stateRef.get
@@ -197,20 +210,8 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
       //one of subscribers can consume message
 
 
-      def ifUnlocked(): Future[Ack] = {
-        val ackFut = try {
-          val result = processingFunction(msg)
-          processResult(result)
-        } catch {
-          case NonFatal(e) =>
-            onConsumerFinished(e)
-            Future.failed(e)
-        }
-        unlockState()
-        ackFut
-      }
       val res = seenState.lock match {
-        case Unlocked => ChangeStateAndDoAction(seenState.copy(lock = Locked), ifUnlocked)
+        case Unlocked => ChangeStateAndDoAction(seenState.copy(lock = Locked), ifUnlocked(msg))
         case Locked => val promise = Promise[Ack]()
           ChangeStateAndDoAction(stateLens.deferAction(seenState, msg, promise), () => promise.future)
       }
@@ -223,22 +224,23 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
 
   }
 
+  private def pushMsg(seenState: State, msg: Msg, lens: StateLens): ChangeStateAndDoAction = {
+    lens.getSubscriberState(seenState) match {
+      case WaitingForMsg => ChangeStateAndDoAction(lens.setSubscriberState(seenState, WaitingForAck), () => pushToSubscriber(msg, lens.getSubscriber(seenState), lens))
+      case WaitingForAck => val promise = Promise[Ack]
+        ChangeStateAndDoAction(lens.setSubscriberState(seenState, PendingMessage(msg, promise)), () => promise.future)
+      case m: PendingMessage => ChangeStateAndDoAction(seenState, () => Future.failed(new IllegalStateException("got next message before earlier was processed")))
+      case Inactive => ChangeStateAndDoAction(seenState, () => Future.failed(new IllegalStateException("Subscriber is inactive")))
+    }
+  }
 
   @tailrec
   private def processResult(action: ProcessingAction): Future[Ack] = {
     val seenState = stateRef.get
-    def pushMsg(msg: Msg, lens: StateLens): ChangeStateAndDoAction = {
-      lens.getSubscriberState(seenState) match {
-        case WaitingForMsg => ChangeStateAndDoAction(lens.setSubscriberState(seenState, WaitingForAck), () => pushToSubscriber(msg, lens.getSubscriber(seenState), lens))
-        case WaitingForAck => val promise = Promise[Ack]
-          ChangeStateAndDoAction(lens.setSubscriberState(seenState, PendingMessage(msg, promise)), () => promise.future)
-        case m: PendingMessage => ChangeStateAndDoAction(seenState, () => Future.failed(new IllegalStateException("got next message before earlier was processed")))
-        case Inactive => ChangeStateAndDoAction(seenState, () => Future.failed(new IllegalStateException("Subscriber is inactive")))
-      }
-    }
+
     val res: ChangeStateAndDoAction = action match {
-      case PushToInput(msg) => pushMsg(msg, InputLens)
-      case PushToOutput(msg) => pushMsg(msg, OutputLens)
+      case PushToInput(msg) => pushMsg(seenState, msg, InputLens)
+      case PushToOutput(msg) => pushMsg(seenState, msg, OutputLens)
       case NoAction => ChangeStateAndDoAction(seenState, () => Continue)
     }
     if (!compareAndSet(seenState, res.newState)) {
@@ -317,15 +319,15 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
   }
 
   @tailrec
-  private def unlockState(): Unit = {
-    @tailrec
-    def unlockAfterPendingAction(): Unit = {
-      val anotherSeenState = stateRef.get
-      if (!compareAndSet(anotherSeenState, anotherSeenState.copy(lock = Unlocked, action = null))) {
-        unlockAfterPendingAction()
-      }
+  private def unlockAfterPendingAction(): Unit = {
+    val seenState = stateRef.get
+    if (!compareAndSet(seenState, seenState.copy(lock = Unlocked, action = null))) {
+      unlockAfterPendingAction()
     }
+  }
 
+  @tailrec
+  private def unlockState(): Unit = {
     val seenState = stateRef.get
     if (seenState.action != null) {
       val pendingActionProducerFut = try {

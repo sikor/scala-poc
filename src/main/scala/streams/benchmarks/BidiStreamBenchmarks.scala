@@ -25,10 +25,10 @@ import scala.concurrent.duration._
   *
   * Improvement after extracting Res class:
   * [info] Benchmark                                                Mode  Cnt   Score   Error  Units
-  * [info] BidiStreamBenchmarks.BidiStreamBothDirections           thrpt    5   3.782 ± 0.111  ops/s
-  * [info] BidiStreamBenchmarks.BidiStreamOneDirection             thrpt    5   7.648 ± 0.365  ops/s
-  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupBy              thrpt    5   3.577 ± 0.051  ops/s
-  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneDirection  thrpt    5  10.650 ± 0.571  ops/s
+  * [info] BidiStreamBenchmarks.BidiStreamBothDirections           thrpt    5   4.615 ± 0.204  ops/s
+  * [info] BidiStreamBenchmarks.BidiStreamOneDirection             thrpt    5  10.238 ± 0.393  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupBy              thrpt    5   3.549 ± 0.089  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneDirection  thrpt    5  10.571 ± 0.326  ops/s
   *
   */
 object BidiStreamBenchmarks {
