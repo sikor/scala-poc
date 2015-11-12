@@ -139,4 +139,25 @@ class BidiStreamTest extends FlatSpec with Matchers {
     inputMessages.toSet.size should be(200)
     outputMessages.size() should be(0)
   }
+
+  "all messages" should "be forwarded from one producer to one consumer" in {
+    val inputMessages = new ConcurrentLinkedQueue[Long]()
+    def procIn(m: Any): ProcessingAction = {
+      PushToInput(m)
+    }
+
+    def procOut(m: Any): ProcessingAction = {
+      PushToOutput(m)
+    }
+    val bidi = new BidiStream(procIn, procOut)
+    val inObs = new AwaitableObserver(m => {
+      inputMessages.add(m.asInstanceOf[Long])
+      Continue
+    })
+    bidi.in().subscribe(inObs)
+    Observable.range(0, 100, 1).subscribe(bidi.in())
+    bidi.out().onComplete()
+    inObs.await(4.second)
+    assert(inputMessages.size() == 100)
+  }
 }

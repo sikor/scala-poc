@@ -190,8 +190,6 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
       case class Res(newState: State, effect: () => Future[Ack])
 
       val res = seenState.lock match {
-        case Locked => val promise = Promise[Ack]()
-          Res(stateLens.deferAction(seenState, msg, promise), () => promise.future)
         case Unlocked => Res(seenState.copy(lock = Locked), () => {
           val ackFut = {
             try {
@@ -202,9 +200,11 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
                 Future.failed(e)
             }
           }
-          unlockState() //promise of the pending action can be completed before we return ack to first producer.
+          unlockState()
           ackFut
         })
+        case Locked => val promise = Promise[Ack]()
+          Res(stateLens.deferAction(seenState, msg, promise), () => promise.future)
       }
       if (!stateRef.compareAndSet(seenState, res.newState)) {
         onNext(msg)
@@ -243,41 +243,45 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
 
   private def pushToSubscriber(msg: Msg, sub: Subscriber[Msg], subStateLens: StateLens): Future[Ack] = {
     val subAck: Future[Ack] = sub.onNext(msg)
-    val producerPromise: Promise[Ack] = Promise()
-    subAck.onComplete(onSubscriberAck(sub, subStateLens, producerPromise))(sub.scheduler)
-    producerPromise.future
+    if (subAck.isCompleted) {
+      onSubscriberAck(sub, subStateLens)(subAck.value.get)
+    } else {
+      val producerPromise: Promise[Ack] = Promise()
+      subAck.onComplete(ack => producerPromise.completeWith(onSubscriberAck(sub, subStateLens)(ack)))(sub.scheduler)
+      producerPromise.future
+    }
   }
 
   @tailrec
-  private def onSubscriberAck(sub: Subscriber[Msg], subStateLens: StateLens, producerPromise: Promise[Ack])(ack: Try[Ack]): Unit = {
-    case class Res(newState: State, effect: () => Unit)
+  private def onSubscriberAck(sub: Subscriber[Msg], subStateLens: StateLens)(ack: Try[Ack]): Future[Ack] = {
+    case class Res(newState: State, effect: () => Future[Ack])
     val seenState = stateRef.get
     val res: Res = ack match {
-      case Failure(t) => Res(subStateLens.setSubscriberState(seenState, Inactive), () => {
-        producerPromise.failure(t)
-        //when we complete ack with failure than we should not get any messages from given producer
-        onConsumerFinished(t)
-      })
       case Success(a) =>
         a match {
           case Continue =>
             subStateLens.getSubscriberState(seenState) match {
               case m: PendingMessage => Res(subStateLens.setSubscriberState(seenState, WaitingForAck), () => {
-                producerPromise.success(Continue)
                 m.ackPromise.completeWith(pushToSubscriber(m.msg, sub, subStateLens))
+                Continue
               })
-              case WaitingForAck => Res(subStateLens.setSubscriberState(seenState, WaitingForMsg), () => producerPromise.success(Continue))
-              case WaitingForMsg => Res(seenState, () => producerPromise.failure(new IllegalStateException())) //illegal state
-              case Inactive => Res(seenState, () => producerPromise.failure(new IllegalStateException())) //illegal state
+              case WaitingForAck => Res(subStateLens.setSubscriberState(seenState, WaitingForMsg), () => Continue)
+              case WaitingForMsg => Res(seenState, () => Future.failed(new IllegalStateException())) //illegal state
+              case Inactive => Res(seenState, () => Future.failed(new IllegalStateException())) //illegal state
             }
           case Cancel => Res(subStateLens.setSubscriberState(seenState, Inactive), () => {
-            producerPromise.success(Cancel)
             onConsumerFinished()
+            Cancel
           })
         }
+      case Failure(t) => Res(subStateLens.setSubscriberState(seenState, Inactive), () => {
+        //when we complete ack with failure than we should not get any messages from given producer
+        onConsumerFinished(t)
+        Future.failed(t)
+      })
     }
     if (!stateRef.compareAndSet(seenState, res.newState)) {
-      onSubscriberAck(sub, subStateLens, producerPromise)(ack)
+      onSubscriberAck(sub, subStateLens)(ack)
     } else {
       res.effect()
     }
@@ -285,19 +289,6 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
 
   @tailrec
   private def unlockState(): Unit = {
-    val seenState = stateRef.get
-    assert(seenState.lock == Locked)
-    val pendingActionProducerFut = try {
-      seenState.action.map {
-        case IncomingInputMessage(msg, producerPromise) => processResult(onInputMessage(msg))
-        case IncomingOutputMessage(msg, producerPromise) => processResult(onOutputMessage(msg))
-      }
-    } catch {
-      case NonFatal(e) =>
-        onConsumerFinished(e)
-        Some(Future.failed(e))
-    }
-
     @tailrec
     def unlockAfterPendingAction(): Unit = {
       val anotherSeenState = stateRef.get
@@ -305,7 +296,19 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
         unlockAfterPendingAction()
       }
     }
+
+    val seenState = stateRef.get
     if (seenState.action.isDefined) {
+      val pendingActionProducerFut = try {
+        seenState.action.map {
+          case IncomingInputMessage(msg, producerPromise) => processResult(onInputMessage(msg))
+          case IncomingOutputMessage(msg, producerPromise) => processResult(onOutputMessage(msg))
+        }
+      } catch {
+        case NonFatal(e) =>
+          onConsumerFinished(e)
+          Some(Future.failed(e))
+      }
       unlockAfterPendingAction()
       // only after clearing pending action and unlocking we can send ack to producer which was rejected:
       seenState.action.get.ackPromise.completeWith(pendingActionProducerFut.get)
