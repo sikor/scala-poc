@@ -15,6 +15,21 @@ import scala.concurrent.duration._
 
 /**
   * Created by Paweł Sikora.
+  *
+  * Executor with one thread:
+  * [info] Benchmark                                                Mode  Cnt   Score   Error  Units
+  * [info] BidiStreamBenchmarks.BidiStreamBothDirections           thrpt    5   2.672 ± 0.173  ops/s
+  * [info] BidiStreamBenchmarks.BidiStreamOneDirection             thrpt    5   5.709 ± 0.021  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupBy              thrpt    5   3.598 ± 0.065  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneDirection  thrpt    5  10.654 ± 0.093  ops/s
+  *
+  * Improvement after extracting Res class:
+  * [info] Benchmark                                                Mode  Cnt   Score   Error  Units
+  * [info] BidiStreamBenchmarks.BidiStreamBothDirections           thrpt    5   3.782 ± 0.111  ops/s
+  * [info] BidiStreamBenchmarks.BidiStreamOneDirection             thrpt    5   7.648 ± 0.365  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupBy              thrpt    5   3.577 ± 0.051  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneDirection  thrpt    5  10.650 ± 0.571  ops/s
+  *
   */
 object BidiStreamBenchmarks {
   val iterations = 1000000
@@ -29,7 +44,7 @@ object BidiStreamBenchmarks {
           th
         }
       }),
-      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(4, new ThreadFactory {
+      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1, new ThreadFactory {
         override def newThread(r: Runnable): Thread = {
           val th = new Thread(r)
           th.setDaemon(true)
@@ -46,18 +61,18 @@ class BidiStreamBenchmarks {
   import BidiStreamBenchmarks._
 
   //
-    @Benchmark
-    def BidiStreamOneDirection(): Unit = {
-      def procIn(m: Any): ProcessingAction = {
-        PushToInput(m)
-      }
-      val bidi = new BidiStream(procIn, _ => NoAction)
-      val inObs = new AwaitableObserver()
-      bidi.in().subscribe(inObs)
-      Observable.range(0, iterations, 1).subscribe(bidi.in())
-      bidi.out().onComplete()
-      inObs.await(4.second)
+  @Benchmark
+  def BidiStreamOneDirection(): Unit = {
+    def procIn(m: Any): ProcessingAction = {
+      PushToInput(m)
     }
+    val bidi = new BidiStream(procIn, _ => NoAction)
+    val inObs = new AwaitableObserver()
+    bidi.in().subscribe(inObs)
+    Observable.range(0, iterations, 1).subscribe(bidi.in())
+    bidi.out().onComplete()
+    inObs.await(4.second)
+  }
 
   @Benchmark
   def BidiStreamBothDirections(): Unit = {

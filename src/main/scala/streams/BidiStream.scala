@@ -113,6 +113,8 @@ private[streams] object BidiStream {
     override def getSubscriber(state: State): Subscriber[Any] = state.outputSub
   }
 
+  case class ChangeStateAndDoAction(newState: State, effect: () => Future[Ack])
+
 }
 
 class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any => ProcessingAction) {
@@ -185,6 +187,7 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
       onConsumerFinished()
     }
 
+
     @tailrec
     final override def onNext(msg: Msg): Future[Ack] = {
       val seenState = stateRef.get
@@ -193,11 +196,11 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
       //both subscribers have no pending messages
       //one of subscribers can consume message
 
-      case class Res(newState: State, effect: () => Future[Ack])
 
       def ifUnlocked(): Future[Ack] = {
         val ackFut = try {
-          processResult(processingFunction(msg))
+          val result = processingFunction(msg)
+          processResult(result)
         } catch {
           case NonFatal(e) =>
             onConsumerFinished(e)
@@ -207,9 +210,9 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
         ackFut
       }
       val res = seenState.lock match {
-        case Unlocked => Res(seenState.copy(lock = Locked), ifUnlocked)
+        case Unlocked => ChangeStateAndDoAction(seenState.copy(lock = Locked), ifUnlocked)
         case Locked => val promise = Promise[Ack]()
-          Res(stateLens.deferAction(seenState, msg, promise), () => promise.future)
+          ChangeStateAndDoAction(stateLens.deferAction(seenState, msg, promise), () => promise.future)
       }
       if (!compareAndSet(seenState, res.newState)) {
         onNext(msg)
@@ -224,20 +227,19 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
   @tailrec
   private def processResult(action: ProcessingAction): Future[Ack] = {
     val seenState = stateRef.get
-    val promise = Promise[Ack]
-    case class Res(newState: State, effect: () => Future[Ack])
-    def pushMsg(msg: Msg, lens: StateLens): Res = {
+    def pushMsg(msg: Msg, lens: StateLens): ChangeStateAndDoAction = {
       lens.getSubscriberState(seenState) match {
-        case m: PendingMessage => Res(seenState, () => Future.failed(new IllegalStateException("got next message before earlier was processed")))
-        case WaitingForAck => Res(lens.setSubscriberState(seenState, PendingMessage(msg, promise)), () => promise.future)
-        case WaitingForMsg => Res(lens.setSubscriberState(seenState, WaitingForAck), () => pushToSubscriber(msg, lens.getSubscriber(seenState), lens))
-        case Inactive => Res(seenState, () => Future.failed(new IllegalStateException("Subscriber is inactive")))
+        case WaitingForMsg => ChangeStateAndDoAction(lens.setSubscriberState(seenState, WaitingForAck), () => pushToSubscriber(msg, lens.getSubscriber(seenState), lens))
+        case WaitingForAck => val promise = Promise[Ack]
+          ChangeStateAndDoAction(lens.setSubscriberState(seenState, PendingMessage(msg, promise)), () => promise.future)
+        case m: PendingMessage => ChangeStateAndDoAction(seenState, () => Future.failed(new IllegalStateException("got next message before earlier was processed")))
+        case Inactive => ChangeStateAndDoAction(seenState, () => Future.failed(new IllegalStateException("Subscriber is inactive")))
       }
     }
-    val res = action match {
+    val res: ChangeStateAndDoAction = action match {
       case PushToInput(msg) => pushMsg(msg, InputLens)
       case PushToOutput(msg) => pushMsg(msg, OutputLens)
-      case NoAction => Res(seenState, () => Continue)
+      case NoAction => ChangeStateAndDoAction(seenState, () => Continue)
     }
     if (!compareAndSet(seenState, res.newState)) {
       processResult(action)
@@ -246,6 +248,9 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     }
   }
 
+  /**
+    * When we call this method subscriber has to be in WaitingForMessage state.
+    */
   private def pushToSubscriber(msg: Msg, sub: Subscriber[Msg], subStateLens: StateLens): Future[Ack] = {
     val subAck: Future[Ack] = sub.onNext(msg)
     if (subAck == Continue) {
@@ -261,16 +266,15 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
 
   @tailrec
   private def onContinue(sub: Subscriber[Msg], subStateLens: StateLens): Future[Ack] = {
-    case class Res(newState: State, effect: () => Future[Ack])
     val seenState = stateRef.get
     val res = subStateLens.getSubscriberState(seenState) match {
-      case WaitingForAck => Res(subStateLens.setSubscriberState(seenState, WaitingForMsg), () => Continue)
-      case m: PendingMessage => Res(subStateLens.setSubscriberState(seenState, WaitingForAck), () => {
+      case WaitingForAck => ChangeStateAndDoAction(subStateLens.setSubscriberState(seenState, WaitingForMsg), () => Continue)
+      case m: PendingMessage => ChangeStateAndDoAction(subStateLens.setSubscriberState(seenState, WaitingForAck), () => {
         m.ackPromise.completeWith(pushToSubscriber(m.msg, sub, subStateLens))
         Continue
       })
-      case WaitingForMsg => Res(seenState, () => Future.failed(new IllegalStateException())) //illegal state
-      case Inactive => Res(seenState, () => Future.failed(new IllegalStateException())) //illegal state
+      case WaitingForMsg => ChangeStateAndDoAction(seenState, () => Future.failed(new IllegalStateException())) //illegal state
+      case Inactive => ChangeStateAndDoAction(seenState, () => Future.failed(new IllegalStateException())) //illegal state
     }
     if (!compareAndSet(seenState, res.newState)) {
       onContinue(sub, subStateLens)
@@ -281,27 +285,25 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
 
   @tailrec
   private def onSubscriberAck(sub: Subscriber[Msg], subStateLens: StateLens, ack: Try[Ack]): Future[Ack] = {
-    case class Res(newState: State, effect: () => Future[Ack])
     val seenState = stateRef.get
-    val res: Res = ack match {
+    val res: ChangeStateAndDoAction = ack match {
       case Success(a) =>
         a match {
           case Continue =>
             subStateLens.getSubscriberState(seenState) match {
-              case m: PendingMessage => Res(subStateLens.setSubscriberState(seenState, WaitingForAck), () => {
+              case m: PendingMessage => ChangeStateAndDoAction(subStateLens.setSubscriberState(seenState, WaitingForAck), () => {
                 m.ackPromise.completeWith(pushToSubscriber(m.msg, sub, subStateLens))
                 Continue
               })
-              case WaitingForAck => Res(subStateLens.setSubscriberState(seenState, WaitingForMsg), () => Continue)
-              case WaitingForMsg => Res(seenState, () => Future.failed(new IllegalStateException())) //illegal state
-              case Inactive => Res(seenState, () => Future.failed(new IllegalStateException())) //illegal state
+              case WaitingForAck => ChangeStateAndDoAction(subStateLens.setSubscriberState(seenState, WaitingForMsg), () => Continue)
+              case _ => ChangeStateAndDoAction(seenState, () => Future.failed(new IllegalStateException())) //illegal state
             }
-          case Cancel => Res(subStateLens.setSubscriberState(seenState, Inactive), () => {
+          case Cancel => ChangeStateAndDoAction(subStateLens.setSubscriberState(seenState, Inactive), () => {
             onConsumerFinished()
             Cancel
           })
         }
-      case Failure(t) => Res(subStateLens.setSubscriberState(seenState, Inactive), () => {
+      case Failure(t) => ChangeStateAndDoAction(subStateLens.setSubscriberState(seenState, Inactive), () => {
         //when we complete ack with failure than we should not get any messages from given producer
         onConsumerFinished(t)
         Future.failed(t)

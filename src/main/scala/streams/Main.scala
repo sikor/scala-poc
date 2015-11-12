@@ -41,11 +41,10 @@ object Main {
   val iterations = 10000000000l
 
   def main(args: Array[String]) {
-    monifuTest()
+    bidiTest()
   }
 
   def bidiTest(): Unit = {
-
     val state = new SimpleState
     def procIn(m: Any): ProcessingAction = {
       PushToInput(state.updateState(1))
