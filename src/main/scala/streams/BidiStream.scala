@@ -1,6 +1,7 @@
 package streams
 
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicReference
 
 import monifu.concurrent.atomic.Atomic
 import monifu.reactive.Ack.{Cancel, Continue}
@@ -71,7 +72,7 @@ private[streams] object BidiStream {
     * @param inputSub can be set only once.
     * @param outputSub can be set only once.
     */
-  case class State(inputSubState: SubscriberState, outputSubState: SubscriberState, lock: Lock, action: Option[DeferredAction],
+  case class State(inputSubState: SubscriberState, outputSubState: SubscriberState, lock: Lock, action: DeferredAction,
                    inputSub: Subscriber[Any], outputSub: Subscriber[Any])
 
   sealed trait StateLens {
@@ -91,7 +92,7 @@ private[streams] object BidiStream {
 
     override def getSubscriberState(state: State): SubscriberState = state.inputSubState
 
-    override def deferAction(state: State, msg: Any, ackPromise: Promise[Ack]): State = state.copy(action = Some(IncomingInputMessage(msg, ackPromise)))
+    override def deferAction(state: State, msg: Any, ackPromise: Promise[Ack]): State = state.copy(action = IncomingInputMessage(msg, ackPromise))
 
     override def setSubscriber(state: State, subscriber: Subscriber[Any], subscriberState: SubscriberState): State =
       state.copy(inputSub = subscriber, inputSubState = subscriberState)
@@ -99,12 +100,12 @@ private[streams] object BidiStream {
     override def getSubscriber(state: State): Subscriber[Any] = state.inputSub
   }
 
-  case object OutpuLens extends StateLens {
+  case object OutputLens extends StateLens {
     override def setSubscriberState(state: State, subscriberState: SubscriberState): State = state.copy(outputSubState = subscriberState)
 
     override def getSubscriberState(state: State): SubscriberState = state.outputSubState
 
-    override def deferAction(state: State, msg: Any, ackPromise: Promise[Ack]): State = state.copy(action = Some(IncomingOutputMessage(msg, ackPromise)))
+    override def deferAction(state: State, msg: Any, ackPromise: Promise[Ack]): State = state.copy(action = IncomingOutputMessage(msg, ackPromise))
 
     override def setSubscriber(state: State, subscriber: Subscriber[Any], subscriberState: SubscriberState): State =
       state.copy(outputSub = subscriber, outputSubState = subscriberState)
@@ -118,16 +119,21 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
   type Msg = Any
 
 
-  private[this] val stateRef = Atomic(State(Inactive, Inactive, Unlocked, None, null, null))
+  private[this] val stateRef = new AtomicReference[State](State(Inactive, Inactive, Unlocked, null, null, null))
   private[this] val completedCount = Atomic(0)
   private[this] val errors = new ConcurrentLinkedQueue[Throwable]()
 
   private[this] val input = new EntangledSubject(onInputMessage, InputLens)
-  private[this] val output = new EntangledSubject(onOutputMessage, OutpuLens)
+  private[this] val output = new EntangledSubject(onOutputMessage, OutputLens)
 
   def in(): Subject[Msg, Msg] = input
 
   def out(): Subject[Msg, Msg] = output
+
+  private def compareAndSet(expectedState: State, newState: State): Boolean = {
+    val curState: State = stateRef.get()
+    (curState eq expectedState) && stateRef.compareAndSet(expectedState, newState)
+  }
 
   private def onConsumerFinished(e: Throwable = null): Unit = {
     if (e != null) {
@@ -137,7 +143,7 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     if (completedCount.incrementAndGet() == 2) {
       val state = stateRef.get
       completeSubscriber(state, InputLens)
-      completeSubscriber(state, OutpuLens)
+      completeSubscriber(state, OutputLens)
     }
   }
 
@@ -165,7 +171,7 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
       if (stateLens.getSubscriber(seenState) != null) {
         subscriber.onError(new IllegalStateException("Cannot subscribe twice to a one subject of BidiStream"))
       } else {
-        if (!stateRef.compareAndSet(seenState, stateLens.setSubscriber(seenState, subscriber, WaitingForMsg))) {
+        if (!compareAndSet(seenState, stateLens.setSubscriber(seenState, subscriber, WaitingForMsg))) {
           onSubscribe(subscriber)
         }
       }
@@ -189,24 +195,23 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
 
       case class Res(newState: State, effect: () => Future[Ack])
 
+      def onUnlocked(): Future[Ack] = {
+        val ackFut = try {
+          processResult(processingFunction(msg))
+        } catch {
+          case NonFatal(e) =>
+            onConsumerFinished(e)
+            Future.failed(e)
+        }
+        unlockState()
+        ackFut
+      }
       val res = seenState.lock match {
-        case Unlocked => Res(seenState.copy(lock = Locked), () => {
-          val ackFut = {
-            try {
-              processResult(processingFunction(msg))
-            } catch {
-              case NonFatal(e) =>
-                onConsumerFinished(e)
-                Future.failed(e)
-            }
-          }
-          unlockState()
-          ackFut
-        })
+        case Unlocked => Res(seenState.copy(lock = Locked), onUnlocked)
         case Locked => val promise = Promise[Ack]()
           Res(stateLens.deferAction(seenState, msg, promise), () => promise.future)
       }
-      if (!stateRef.compareAndSet(seenState, res.newState)) {
+      if (!compareAndSet(seenState, res.newState)) {
         onNext(msg)
       } else {
         res.effect()
@@ -231,10 +236,10 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     }
     val res = action match {
       case PushToInput(msg) => pushMsg(msg, InputLens)
-      case PushToOutput(msg) => pushMsg(msg, OutpuLens)
+      case PushToOutput(msg) => pushMsg(msg, OutputLens)
       case NoAction => Res(seenState, () => Continue)
     }
-    if (!stateRef.compareAndSet(seenState, res.newState)) {
+    if (!compareAndSet(seenState, res.newState)) {
       processResult(action)
     } else {
       res.effect()
@@ -243,17 +248,39 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
 
   private def pushToSubscriber(msg: Msg, sub: Subscriber[Msg], subStateLens: StateLens): Future[Ack] = {
     val subAck: Future[Ack] = sub.onNext(msg)
-    if (subAck.isCompleted) {
-      onSubscriberAck(sub, subStateLens)(subAck.value.get)
+    if (subAck == Continue) {
+      onContinue(sub, subStateLens)
+    } else if (subAck.isCompleted) {
+      onSubscriberAck(sub, subStateLens, subAck.value.get)
     } else {
       val producerPromise: Promise[Ack] = Promise()
-      subAck.onComplete(ack => producerPromise.completeWith(onSubscriberAck(sub, subStateLens)(ack)))(sub.scheduler)
+      subAck.onComplete(ack => producerPromise.completeWith(onSubscriberAck(sub, subStateLens, ack)))(sub.scheduler)
       producerPromise.future
     }
   }
 
   @tailrec
-  private def onSubscriberAck(sub: Subscriber[Msg], subStateLens: StateLens)(ack: Try[Ack]): Future[Ack] = {
+  private def onContinue(sub: Subscriber[Msg], subStateLens: StateLens): Future[Ack] = {
+    case class Res(newState: State, effect: () => Future[Ack])
+    val seenState = stateRef.get
+    val res = subStateLens.getSubscriberState(seenState) match {
+      case WaitingForAck => Res(subStateLens.setSubscriberState(seenState, WaitingForMsg), () => Continue)
+      case m: PendingMessage => Res(subStateLens.setSubscriberState(seenState, WaitingForAck), () => {
+        m.ackPromise.completeWith(pushToSubscriber(m.msg, sub, subStateLens))
+        Continue
+      })
+      case WaitingForMsg => Res(seenState, () => Future.failed(new IllegalStateException())) //illegal state
+      case Inactive => Res(seenState, () => Future.failed(new IllegalStateException())) //illegal state
+    }
+    if (!compareAndSet(seenState, res.newState)) {
+      onContinue(sub, subStateLens)
+    } else {
+      res.effect()
+    }
+  }
+
+  @tailrec
+  private def onSubscriberAck(sub: Subscriber[Msg], subStateLens: StateLens, ack: Try[Ack]): Future[Ack] = {
     case class Res(newState: State, effect: () => Future[Ack])
     val seenState = stateRef.get
     val res: Res = ack match {
@@ -280,8 +307,8 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
         Future.failed(t)
       })
     }
-    if (!stateRef.compareAndSet(seenState, res.newState)) {
-      onSubscriberAck(sub, subStateLens)(ack)
+    if (!compareAndSet(seenState, res.newState)) {
+      onSubscriberAck(sub, subStateLens, ack)
     } else {
       res.effect()
     }
@@ -292,28 +319,28 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     @tailrec
     def unlockAfterPendingAction(): Unit = {
       val anotherSeenState = stateRef.get
-      if (!stateRef.compareAndSet(anotherSeenState, anotherSeenState.copy(lock = Unlocked, action = None))) {
+      if (!compareAndSet(anotherSeenState, anotherSeenState.copy(lock = Unlocked, action = null))) {
         unlockAfterPendingAction()
       }
     }
 
     val seenState = stateRef.get
-    if (seenState.action.isDefined) {
+    if (seenState.action != null) {
       val pendingActionProducerFut = try {
-        seenState.action.map {
+        seenState.action match {
           case IncomingInputMessage(msg, producerPromise) => processResult(onInputMessage(msg))
           case IncomingOutputMessage(msg, producerPromise) => processResult(onOutputMessage(msg))
         }
       } catch {
         case NonFatal(e) =>
           onConsumerFinished(e)
-          Some(Future.failed(e))
+          Future.failed(e)
       }
       unlockAfterPendingAction()
       // only after clearing pending action and unlocking we can send ack to producer which was rejected:
-      seenState.action.get.ackPromise.completeWith(pendingActionProducerFut.get)
+      seenState.action.ackPromise.completeWith(pendingActionProducerFut)
     } else {
-      if (!stateRef.compareAndSet(seenState, seenState.copy(lock = Unlocked))) {
+      if (!compareAndSet(seenState, seenState.copy(lock = Unlocked))) {
         unlockState()
       }
     }

@@ -1,11 +1,15 @@
 package streams.benchmarks
 
-import monifu.concurrent.Implicits.globalScheduler
+import java.util.concurrent.{ThreadFactory, Executors}
+
+import monifu.concurrent.{UncaughtExceptionReporter, Scheduler}
+import monifu.concurrent.schedulers.AsyncScheduler
 import monifu.reactive.Observable
 import org.openjdk.jmh.annotations.Benchmark
 import streams.BidiStream
 import streams.BidiStream.{PushToOutput, NoAction, ProcessingAction, PushToInput}
 
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
 /**
@@ -13,6 +17,27 @@ import scala.concurrent.duration._
   */
 object BidiStreamBenchmarks {
   val iterations = 1000000
+
+  implicit val globalScheduler: Scheduler =
+    AsyncScheduler(
+      Executors.newSingleThreadScheduledExecutor(new ThreadFactory {
+        def newThread(r: Runnable): Thread = {
+          val th = new Thread(r)
+          th.setDaemon(true)
+          th.setName("benchmark-scheduler")
+          th
+        }
+      }),
+      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1, new ThreadFactory {
+        override def newThread(r: Runnable): Thread = {
+          val th = new Thread(r)
+          th.setDaemon(true)
+          th.setName("benchmark-executor")
+          th
+        }
+      })),
+      UncaughtExceptionReporter.LogExceptionsToStandardErr
+    )
 }
 
 class BidiStreamBenchmarks {
@@ -37,10 +62,10 @@ class BidiStreamBenchmarks {
   def bidiStreamBothDirections(): Unit = {
     val state = new SimpleState
     def procIn(m: Any): ProcessingAction = {
-      PushToInput(state.updateState(m.asInstanceOf[Long]))
+      PushToInput(state.updateState(2))
     }
     def procOut(m: Any): ProcessingAction = {
-      PushToOutput(state.updateState(m.asInstanceOf[Long]))
+      PushToOutput(state.updateState(1))
     }
     val bidi = new BidiStream(procIn, procOut)
     val inObs = new AwaitableObserver()
