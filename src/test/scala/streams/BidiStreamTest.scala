@@ -3,22 +3,22 @@ package streams
 import java.util
 import java.util.concurrent.ConcurrentLinkedQueue
 
-import monifu.reactive.Ack.Continue
-import monifu.reactive.{Ack, Observer, Observable}
-import org.scalatest.{FlatSpec, Matchers, FunSuite}
-import streams.BidiStream.{PushToOutput, PushToInput, ProcessingAction}
-
-import scala.concurrent.{Future, Await, Promise}
-import concurrent.duration._
 import monifu.concurrent.Implicits.globalScheduler
+import monifu.reactive.Ack.Continue
+import monifu.reactive.{Ack, Observable, Observer}
+import org.scalatest.{FunSuite, Matchers}
+import streams.BidiStream.{ProcessingAction, PushToInput, PushToOutput}
+import streams.benchmarks.MergeAndGroupByBidi
 
-import scala.util.Random
 import scala.collection.JavaConversions._
+import scala.concurrent.duration._
+import scala.concurrent.{Await, Future, Promise}
+import scala.util.Random
 
 /**
   * Created by Paweł Sikora.
   */
-class BidiStreamTest extends FlatSpec with Matchers {
+class BidiStreamTest extends FunSuite with Matchers {
 
   class AwaitableObserver(onNextFunc: Any => Future[Ack] = _ => Continue) extends Observer[Any] {
     private val completed = Promise[Unit]
@@ -37,7 +37,7 @@ class BidiStreamTest extends FlatSpec with Matchers {
     override def onComplete(): Unit = completed.success(())
   }
 
-  "Processor functions" should "be called atomically" in {
+  test("Processor functions should be called atomically") {
     val processingEvents = new ConcurrentLinkedQueue[String]()
     val random = new Random()
     def procIn(m: Any): ProcessingAction = {
@@ -70,7 +70,7 @@ class BidiStreamTest extends FlatSpec with Matchers {
     }
   }
 
-  "All incoming messages" should "be pushed" in {
+  test("Messages from one source routed to one sink") {
     val inputMessages = new ConcurrentLinkedQueue[Long]()
     val outputMessages = new ConcurrentLinkedQueue[Long]()
     val random = new Random()
@@ -109,7 +109,7 @@ class BidiStreamTest extends FlatSpec with Matchers {
     }
   }
 
-  "All incoming messages" should "be pushed to one subscriber" in {
+  test("All incoming messages pushed to one sink") {
     val inputMessages = new util.HashSet[Long]()
     val outputMessages = new util.HashSet[Long]()
     val random = new Random()
@@ -140,7 +140,7 @@ class BidiStreamTest extends FlatSpec with Matchers {
     outputMessages.size() should be(0)
   }
 
-  "all messages" should "be forwarded from one producer to one consumer" in {
+  test("Should work with only one input and one output") {
     val inputMessages = new ConcurrentLinkedQueue[Long]()
     def procIn(m: Any): ProcessingAction = {
       PushToInput(m)
@@ -159,5 +159,28 @@ class BidiStreamTest extends FlatSpec with Matchers {
     bidi.out().onComplete()
     inObs.await(4.second)
     assert(inputMessages.size() == 100)
+  }
+
+  test("monifu bidi by merge and group by") {
+    import MergeAndGroupByBidi._
+    val inObs = new AwaitableObserver(v => {
+      println(v)
+      Continue
+    })
+    val outObs = new AwaitableObserver(v => {
+      println(v)
+      Continue
+    })
+    val s1 = Observable.range(0, 100, 1).map(v => FromS1(v))
+    val s2 = Observable.range(0, 100, 1).map(v => FromS2(v))
+    val state = new RoutingState
+    Observable.merge(s1, s2).groupBy(state.routingFunc).subscribe {
+      s => s.key match {
+        case Input => s.map(v => v.value).subscribe(inObs); Continue
+        case Output => s.map(v => v.value).subscribe(outObs); Continue
+      }
+    }
+    inObs.await(4.second)
+    outObs.await(4.second)
   }
 }

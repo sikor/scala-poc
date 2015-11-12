@@ -4,12 +4,14 @@ import java.util.concurrent.{Executors, ThreadFactory}
 
 import monifu.concurrent.schedulers.AsyncScheduler
 import monifu.concurrent.{Scheduler, UncaughtExceptionReporter}
+import monifu.reactive.Ack.Continue
 import monifu.reactive.Observable
 import streams.BidiStream.{ProcessingAction, PushToInput, PushToOutput}
-import streams.benchmarks.{AwaitableObserver, SimpleState}
+import streams.benchmarks.{AwaitableObserver, MergeAndGroupByBidi, SimpleState}
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
+
 /**
   * Created by Paweł Sikora.
   */
@@ -36,8 +38,14 @@ object Main {
       UncaughtExceptionReporter.LogExceptionsToStandardErr
     )
 
+  val iterations = 10000000000l
+
   def main(args: Array[String]) {
-    val iterations = 10000000000l
+    monifuTest()
+  }
+
+  def bidiTest(): Unit = {
+
     val state = new SimpleState
     def procIn(m: Any): ProcessingAction = {
       PushToInput(state.updateState(1))
@@ -49,11 +57,29 @@ object Main {
     val inObs = new AwaitableObserver()
     val outObs = new AwaitableObserver()
     bidi.in().subscribe(inObs)
-    bidi.out().subscribe(outObs)
+    //    bidi.out().subscribe(outObs)
+    bidi.out().onComplete()
     Observable.range(0, iterations, 1).subscribe(bidi.in())
-    Observable.range(0, iterations, 1).subscribe(bidi.out())
+    //    Observable.range(0, iterations, 1).subscribe(bidi.out())
     inObs.await(1000.second)
     outObs.await(1000.second)
   }
 
+  def monifuTest(): Unit = {
+    import MergeAndGroupByBidi._
+    val inObs = new AwaitableObserver()
+    val outObs = new AwaitableObserver()
+
+    val s1 = Observable.range(0, iterations, 1).map(v => FromS1(v))
+    val s2 = Observable.range(0, iterations, 1).take(0).map(v => FromS2(v))
+    val state = new RoutingState
+    Observable.merge(s1, s2).groupBy(state.routingFunc).subscribe {
+      s => s.key match {
+        case Input => s.map(v => v.value).subscribe(inObs); Continue
+        case Output => s.map(v => v.value).subscribe(outObs); Continue
+      }
+    }
+    inObs.await(1000.second)
+    outObs.await(1000.second)
+  }
 }

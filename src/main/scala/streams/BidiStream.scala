@@ -195,7 +195,7 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
 
       case class Res(newState: State, effect: () => Future[Ack])
 
-      def onUnlocked(): Future[Ack] = {
+      def ifUnlocked(): Future[Ack] = {
         val ackFut = try {
           processResult(processingFunction(msg))
         } catch {
@@ -207,7 +207,7 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
         ackFut
       }
       val res = seenState.lock match {
-        case Unlocked => Res(seenState.copy(lock = Locked), onUnlocked)
+        case Unlocked => Res(seenState.copy(lock = Locked), ifUnlocked)
         case Locked => val promise = Promise[Ack]()
           Res(stateLens.deferAction(seenState, msg, promise), () => promise.future)
       }
@@ -328,8 +328,8 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     if (seenState.action != null) {
       val pendingActionProducerFut = try {
         seenState.action match {
-          case IncomingInputMessage(msg, producerPromise) => processResult(onInputMessage(msg))
-          case IncomingOutputMessage(msg, producerPromise) => processResult(onOutputMessage(msg))
+          case IncomingInputMessage(msg, _) => processResult(onInputMessage(msg))
+          case IncomingOutputMessage(msg, _) => processResult(onOutputMessage(msg))
         }
       } catch {
         case NonFatal(e) =>
