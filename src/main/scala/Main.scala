@@ -34,7 +34,6 @@ object Main {
         case r: Route[V] => resolve(r.operationWithParams.execute)
       }
     }
-
     println(resolve(computation))
     folds.Effects.Execute.example()
 
