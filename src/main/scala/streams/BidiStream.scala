@@ -113,7 +113,17 @@ private[streams] object BidiStream {
     override def getSubscriber(state: State): Subscriber[Any] = state.outputSub
   }
 
-  case class ChangeStateAndDoAction(newState: State, effect: () => Future[Ack])
+  sealed trait AtomicUpdate
+
+  /**
+    * Means that flow should not be repeated and fresh state should be modified using given function.
+    */
+  case class ChangeStateAndDoAction(stateMod: State => State, effect: () => Future[Ack]) extends AtomicUpdate
+
+  /**
+    * Means that flow which constructed this effect should be repeated if expected state does not match
+    */
+  case class NewStateAndEffect(newState: State, effect: () => Future[Ack]) extends AtomicUpdate
 
 }
 
@@ -188,164 +198,205 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     }
 
 
-    private def ifUnlocked(msg: Msg)(): Future[Ack] = {
-      val ackFut = try {
-        val result = processingFunction(msg)
-        processResult(result)
-      } catch {
-        case NonFatal(e) =>
-          onConsumerFinished(e)
-          Future.failed(e)
-      }
-      unlockState()
-      ackFut
-    }
-
     @tailrec
     final override def onNext(msg: Msg): Future[Ack] = {
       val seenState = stateRef.get
       //if producer is let in into onNext message it means that following should hold:
-      //there is no pending action
+      //there is no buffered message
       //both subscribers have no pending messages
       //one of subscribers can consume message
 
 
       val res = seenState.lock match {
-        case Unlocked => ChangeStateAndDoAction(seenState.copy(lock = Locked), ifUnlocked(msg))
+        case Unlocked => ChangeStateAndDoAction(s => s.copy(lock = Locked), ifUnlocked(msg))
         case Locked => val promise = Promise[Ack]()
-          ChangeStateAndDoAction(stateLens.deferAction(seenState, msg, promise), () => promise.future)
+          ChangeStateAndDoAction(s => stateLens.deferAction(s, msg, promise), () => promise.future)
       }
-      if (!compareAndSet(seenState, res.newState)) {
+      if (!compareAndSet(seenState, res.stateMod(seenState))) {
         onNext(msg)
       } else {
         res.effect()
       }
     }
 
-  }
 
-  private def pushMsg(seenState: State, msg: Msg, lens: StateLens): ChangeStateAndDoAction = {
-    lens.getSubscriberState(seenState) match {
-      case WaitingForMsg => ChangeStateAndDoAction(lens.setSubscriberState(seenState, WaitingForAck), () => pushToSubscriber(msg, lens.getSubscriber(seenState), lens))
-      case WaitingForAck => val promise = Promise[Ack]
-        ChangeStateAndDoAction(lens.setSubscriberState(seenState, PendingMessage(msg, promise)), () => promise.future)
-      case m: PendingMessage => ChangeStateAndDoAction(seenState, () => Future.failed(new IllegalStateException("got next message before earlier was processed")))
-      case Inactive => ChangeStateAndDoAction(seenState, () => Future.failed(new IllegalStateException("Subscriber is inactive")))
+    private def ifUnlocked(msg: Msg)(): Future[Ack] = {
+      val ackFut = try {
+        val result = processingFunction(msg)
+        processResult(stateRef.get(), result)
+      } catch {
+        case NonFatal(e) =>
+          onConsumerFinished(e)
+          Future.failed(e)
+      }
+      unlockState(stateRef.get())
+      ackFut
     }
+
   }
 
+  /**
+    * Access to this method is synchronized using [[State.lock]].
+    * It can modify the state of the subscriber.
+    * The state of the subscriber can be also modified when we get onAck callback.
+    * But if inside this method we see that subscriber is in WaitingForMsg state it means that it won't send onAck callback.
+    * In above situation we have full synchronization on subscriber state until we send him the message and register onComplete callback.
+    * If we send message to subscriber and it will answer us immediately with Continue than we don't have to modify state because
+    * it would be changed from WaitingForMessage -> WaitingForMessage.
+    */
   @tailrec
-  private def processResult(action: ProcessingAction): Future[Ack] = {
-    val seenState = stateRef.get
-
-    val res: ChangeStateAndDoAction = action match {
-      case PushToInput(msg) => pushMsg(seenState, msg, InputLens)
-      case PushToOutput(msg) => pushMsg(seenState, msg, OutputLens)
-      case NoAction => ChangeStateAndDoAction(seenState, () => Continue)
+  private def processResult(state: State, action: ProcessingAction): Future[Ack] = {
+    val res = action match {
+      case PushToInput(msg) => pushMsg(state, msg, InputLens)
+      case PushToOutput(msg) => pushMsg(state, msg, OutputLens)
+      case NoAction => NewStateAndEffect(state, () => Continue)
     }
-    if (!compareAndSet(seenState, res.newState)) {
-      processResult(action)
-    } else {
-      res.effect()
+    res match {
+      case NewStateAndEffect(newState, effect) =>
+        if (!compareAndSet(state, newState)) {
+          processResult(stateRef.get, action)
+        } else {
+          effect()
+        }
+      case ch: ChangeStateAndDoAction => runChangeState(state, ch)
+    }
+  }
+
+  private def pushMsg(s: State, msg: Msg, lens: StateLens): AtomicUpdate = {
+    lens.getSubscriberState(s) match {
+      case WaitingForMsg => pushToSubscriber(msg, lens.getSubscriber(s), lens)
+      case WaitingForAck => val promise = Promise[Ack]
+        NewStateAndEffect(lens.setSubscriberState(s, PendingMessage(msg, promise)), () => promise.future)
+      case m: PendingMessage => NewStateAndEffect(s, () => {
+        val err = new IllegalStateException("got next message before earlier was processed")
+        onConsumerFinished(err)
+        Future.failed(err)
+      })
+      case Inactive => NewStateAndEffect(s, () => {
+        val err = new IllegalStateException("Subscriber is inactive")
+        onConsumerFinished(err)
+        Future.failed(err)
+      })
     }
   }
 
   /**
     * When we call this method subscriber has to be in WaitingForMessage state.
+    * It means that nobody but us can change subscriber state.
+    * Thus we can send the message and modify the state afterwards.
+    * We don't have to change the state from WaitingForMessage to WaitingForAck before sending the message, we can do it later.
+    * State has to be changed before registering onComplete callback on subscriber future and before unlocking/sending buffered message.
+    * The only state element we rely on in this method is subscriber state which won't be changed concurrently (see above).
+    * Thus our state change is unrelated to other state changes and we just return the function which modify the state.
     */
-  private def pushToSubscriber(msg: Msg, sub: Subscriber[Msg], subStateLens: StateLens): Future[Ack] = {
+  private def pushToSubscriber(msg: Msg, sub: Subscriber[Msg], subStateLens: StateLens): ChangeStateAndDoAction = {
     val subAck: Future[Ack] = sub.onNext(msg)
     if (subAck == Continue) {
-      onContinue(sub, subStateLens)
+      ChangeStateAndDoAction(s => subStateLens.setSubscriberState(s, WaitingForMsg), () => Continue)
     } else if (subAck.isCompleted) {
-      onSubscriberAck(sub, subStateLens, subAck.value.get)
+      subAck.value.get match {
+        case Success(a) => a match {
+          case Continue => ChangeStateAndDoAction(s => subStateLens.setSubscriberState(s, WaitingForMsg), () => Continue)
+          case Cancel => ChangeStateAndDoAction(s => subStateLens.setSubscriberState(s, Inactive), () => {
+            onConsumerFinished() //we are sending cancel to our producer so it is finished.
+            Cancel
+          })
+        }
+        case Failure(t) => ChangeStateAndDoAction(s => subStateLens.setSubscriberState(s, Inactive), () => {
+          //when we complete ack with failure than we should not get any messages from given producer
+          onConsumerFinished(t)
+          Future.failed(t)
+        })
+      }
     } else {
-      val producerPromise: Promise[Ack] = Promise()
-      subAck.onComplete(ack => producerPromise.completeWith(onSubscriberAck(sub, subStateLens, ack)))(sub.scheduler)
-      producerPromise.future
-    }
-  }
-
-  @tailrec
-  private def onContinue(sub: Subscriber[Msg], subStateLens: StateLens): Future[Ack] = {
-    val seenState = stateRef.get
-    val res = subStateLens.getSubscriberState(seenState) match {
-      case WaitingForAck => ChangeStateAndDoAction(subStateLens.setSubscriberState(seenState, WaitingForMsg), () => Continue)
-      case m: PendingMessage => ChangeStateAndDoAction(subStateLens.setSubscriberState(seenState, WaitingForAck), () => {
-        m.ackPromise.completeWith(pushToSubscriber(m.msg, sub, subStateLens))
-        Continue
+      ChangeStateAndDoAction(s => subStateLens.setSubscriberState(s, WaitingForAck), () => {
+        val producerPromise: Promise[Ack] = Promise()
+        subAck.onComplete(ack => producerPromise.completeWith(onSubscriberAck(stateRef.get(), sub, subStateLens, ack)))(sub.scheduler)
+        producerPromise.future
       })
-      case WaitingForMsg => ChangeStateAndDoAction(seenState, () => Future.failed(new IllegalStateException())) //illegal state
-      case Inactive => ChangeStateAndDoAction(seenState, () => Future.failed(new IllegalStateException())) //illegal state
-    }
-    if (!compareAndSet(seenState, res.newState)) {
-      onContinue(sub, subStateLens)
-    } else {
-      res.effect()
+
     }
   }
 
+
   @tailrec
-  private def onSubscriberAck(sub: Subscriber[Msg], subStateLens: StateLens, ack: Try[Ack]): Future[Ack] = {
-    val seenState = stateRef.get
-    val res: ChangeStateAndDoAction = ack match {
+  private def onSubscriberAck(state: State, sub: Subscriber[Msg], subStateLens: StateLens, ack: Try[Ack]): Future[Ack] = {
+    val res: AtomicUpdate = ack match {
       case Success(a) =>
         a match {
           case Continue =>
-            subStateLens.getSubscriberState(seenState) match {
-              case m: PendingMessage => ChangeStateAndDoAction(subStateLens.setSubscriberState(seenState, WaitingForAck), () => {
-                m.ackPromise.completeWith(pushToSubscriber(m.msg, sub, subStateLens))
-                Continue
+            subStateLens.getSubscriberState(state) match {
+              case PendingMessage(pendingMsg, pendingPromise) => //pending message means that both producers are waiting for acks.
+                //State modification is defined in pushToSubscriber method. We assume that before calling this method state is WaitingForMessage
+                val res = pushToSubscriber(pendingMsg, sub, subStateLens)
+                ChangeStateAndDoAction(res.stateMod, () => {
+                  pendingPromise.completeWith(res.effect())
+                  Continue
+                })
+              case WaitingForAck => NewStateAndEffect(subStateLens.setSubscriberState(state, WaitingForMsg), () => Continue)
+              case _ => NewStateAndEffect(subStateLens.setSubscriberState(state, Inactive), () => {
+                sub.onError(new IllegalStateException())
+                Future.failed(new IllegalStateException())
               })
-              case WaitingForAck => ChangeStateAndDoAction(subStateLens.setSubscriberState(seenState, WaitingForMsg), () => Continue)
-              case _ => ChangeStateAndDoAction(seenState, () => Future.failed(new IllegalStateException())) //illegal state
             }
-          case Cancel => ChangeStateAndDoAction(subStateLens.setSubscriberState(seenState, Inactive), () => {
+          case Cancel => NewStateAndEffect(subStateLens.setSubscriberState(state, Inactive), () => {
             onConsumerFinished()
             Cancel
           })
         }
-      case Failure(t) => ChangeStateAndDoAction(subStateLens.setSubscriberState(seenState, Inactive), () => {
+      case Failure(t) => NewStateAndEffect(subStateLens.setSubscriberState(state, Inactive), () => {
         //when we complete ack with failure than we should not get any messages from given producer
         onConsumerFinished(t)
         Future.failed(t)
       })
     }
-    if (!compareAndSet(seenState, res.newState)) {
-      onSubscriberAck(sub, subStateLens, ack)
+    res match {
+      case NewStateAndEffect(newState, effect) =>
+        if (!compareAndSet(state, newState)) {
+          onSubscriberAck(stateRef.get, sub, subStateLens, ack)
+        } else {
+          effect()
+        }
+      case ch: ChangeStateAndDoAction => runChangeState(state, ch)
+    }
+
+  }
+
+  @tailrec
+  private def runChangeState(state: State, ch: ChangeStateAndDoAction): Future[Ack] = {
+    if (!compareAndSet(state, ch.stateMod(state))) {
+      runChangeState(stateRef.get(), ch)
     } else {
-      res.effect()
+      ch.effect()
     }
   }
 
   @tailrec
-  private def unlockAfterPendingAction(): Unit = {
-    val seenState = stateRef.get
-    if (!compareAndSet(seenState, seenState.copy(lock = Unlocked, action = null))) {
-      unlockAfterPendingAction()
+  private def unlockAfterPendingAction(state: State): Unit = {
+    if (!compareAndSet(state, state.copy(lock = Unlocked, action = null))) {
+      unlockAfterPendingAction(stateRef.get())
     }
   }
 
   @tailrec
-  private def unlockState(): Unit = {
-    val seenState = stateRef.get
-    if (seenState.action != null) {
+  private def unlockState(state: State): Unit = {
+    if (state.action != null) {
       val pendingActionProducerFut = try {
-        seenState.action match {
-          case IncomingInputMessage(msg, _) => processResult(onInputMessage(msg))
-          case IncomingOutputMessage(msg, _) => processResult(onOutputMessage(msg))
+        state.action match {
+          case IncomingInputMessage(msg, _) => processResult(state, onInputMessage(msg))
+          case IncomingOutputMessage(msg, _) => processResult(state, onOutputMessage(msg))
         }
       } catch {
         case NonFatal(e) =>
           onConsumerFinished(e)
           Future.failed(e)
       }
-      unlockAfterPendingAction()
+      unlockAfterPendingAction(state)
       // only after clearing pending action and unlocking we can send ack to producer which was rejected:
-      seenState.action.ackPromise.completeWith(pendingActionProducerFut)
+      state.action.ackPromise.completeWith(pendingActionProducerFut)
     } else {
-      if (!compareAndSet(seenState, seenState.copy(lock = Unlocked))) {
-        unlockState()
+      if (!compareAndSet(state, state.copy(lock = Unlocked))) {
+        unlockState(stateRef.get())
       }
     }
   }

@@ -14,7 +14,6 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
 /**
-  * Created by Paweł Sikora.
   *
   * Executor with one thread:
   * [info] Benchmark                                                Mode  Cnt   Score   Error  Units
@@ -23,12 +22,27 @@ import scala.concurrent.duration._
   * [info] BidiStreamBenchmarks.MonifuMergeAndGroupBy              thrpt    5   3.598 ± 0.065  ops/s
   * [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneDirection  thrpt    5  10.654 ± 0.093  ops/s
   *
-  * Improvement after extracting Res class:
+  * Improvement after removing case classes definitions from methods
   * [info] Benchmark                                                Mode  Cnt   Score   Error  Units
   * [info] BidiStreamBenchmarks.BidiStreamBothDirections           thrpt    5   4.615 ± 0.204  ops/s
   * [info] BidiStreamBenchmarks.BidiStreamOneDirection             thrpt    5  10.238 ± 0.393  ops/s
   * [info] BidiStreamBenchmarks.MonifuMergeAndGroupBy              thrpt    5   3.549 ± 0.089  ops/s
   * [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneDirection  thrpt    5  10.571 ± 0.326  ops/s
+  *
+  * Improvement after removing one unnecessary compareAndSet and defining untied state modifications
+  * [info] Benchmark                                                Mode  Cnt   Score   Error  Units
+  * [info] BidiStreamBenchmarks.BidiStreamBothDirections           thrpt    5   5.305 ± 0.174  ops/s
+  * [info] BidiStreamBenchmarks.BidiStreamOneDirection             thrpt    5  11.248 ± 0.263  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupBy              thrpt    5   3.568 ± 0.024  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneDirection  thrpt    5  10.676 ± 0.428  ops/s
+  *
+  * Executor with 4 threads:
+  *
+  * [info] Benchmark                                                Mode  Cnt   Score   Error  Units
+  * [info] BidiStreamBenchmarks.BidiStreamBothDirections           thrpt    5   2.634 ± 0.200  ops/s
+  * [info] BidiStreamBenchmarks.BidiStreamOneDirection             thrpt    5  10.835 ± 1.008  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupBy              thrpt    5   2.876 ± 0.227  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneDirection  thrpt    5   9.907 ± 0.763  ops/s
   *
   */
 object BidiStreamBenchmarks {
@@ -44,7 +58,7 @@ object BidiStreamBenchmarks {
           th
         }
       }),
-      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1, new ThreadFactory {
+      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(4, new ThreadFactory {
         override def newThread(r: Runnable): Thread = {
           val th = new Thread(r)
           th.setDaemon(true)
