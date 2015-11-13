@@ -116,7 +116,8 @@ private[streams] object BidiStream {
   sealed trait AtomicUpdate
 
   /**
-    * Means that flow should not be repeated and fresh state should be modified using given function.
+    * Means that in case of update compareAndSet failure flow should not be repeated.
+    * Fresh state should be modified using [[stateMod]] function.
     */
   case class ChangeStateAndDoAction(stateMod: State => State, effect: () => Future[Ack]) extends AtomicUpdate
 
