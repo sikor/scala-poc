@@ -44,6 +44,15 @@ import scala.concurrent.duration._
   * [info] BidiStreamBenchmarks.MonifuMergeAndGroupBy              thrpt    5   2.876 ± 0.227  ops/s
   * [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneDirection  thrpt    5   9.907 ± 0.763  ops/s
   *
+  * Test how our Stream utilize executor.
+  * Executor with 8 threads. This executor is shared among 16 threads of jmh: jmh:run -i 5 -wi 5 -f1 -t16
+  * [info] Benchmark                                                   Mode  Cnt   Score   Error  Units
+  * [info] BidiStreamBenchmarks.BidiStreamBothDirections              thrpt    5  17.042 ± 1.207  ops/s
+  * [info] BidiStreamBenchmarks.BidiStreamOneDirection                thrpt    5  43.059 ± 1.860  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMapTwoStreamsSynchronizedState  thrpt    5  56.310 ± 2.330  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupBy                 thrpt    5   9.881 ± 0.375  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneDirection     thrpt    5  37.383 ± 0.740  ops/s
+  *
   */
 object BidiStreamBenchmarks {
   val iterations = 1000000
@@ -58,7 +67,7 @@ object BidiStreamBenchmarks {
           th
         }
       }),
-      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(4, new ThreadFactory {
+      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(8, new ThreadFactory {
         override def newThread(r: Runnable): Thread = {
           val th = new Thread(r)
           th.setDaemon(true)
@@ -90,7 +99,6 @@ class BidiStreamBenchmarks {
 
   @Benchmark
   def BidiStreamBothDirections(): Unit = {
-    val state = new SimpleState
     def proc(m: Any): ProcessingAction = {
       if (m.asInstanceOf[Long] % 2 == 0) {
         PushToInput(m)
@@ -109,43 +117,17 @@ class BidiStreamBenchmarks {
     outObs.await(4.second)
   }
 
-  //  @Benchmark
-  //  def MonifuMap(): Unit = {
-  //    val inObs = new AwaitableObserver()
-  //    Observable.range(0, iterations, 1).map(l => l).subscribe(inObs)
-  //    inObs.await(4.second)
-  //  }
-  //
-  //  @Benchmark
-  //  def MonifuMapTwoStreams(): Unit = {
-  //    val inObs = new AwaitableObserver()
-  //    val outObs = new AwaitableObserver()
-  //    Observable.range(0, iterations, 1).map(l => l).subscribe(inObs)
-  //    Observable.range(0, iterations, 1).map(l => l).subscribe(outObs)
-  //    inObs.await(4.second)
-  //    outObs.await(4.second)
-  //  }
 
-  //  @Benchmark
-  //  def MonifuMapTwoStreamsSynchronizedState(): Unit = {
-  //    val inObs = new AwaitableObserver()
-  //    val outObs = new AwaitableObserver()
-  //    val state = new SynchState
-  //    Observable.range(0, iterations, 1).map(state.updateState).subscribe(inObs)
-  //    Observable.range(0, iterations, 1).map(state.updateState).subscribe(outObs)
-  //    inObs.await(4.second)
-  //    outObs.await(4.second)
-  //  }
-  //
-  //  @Benchmark
-  //  def MonifuMergeTwoStreams(): Unit = {
-  //    val inObs = new AwaitableObserver()
-  //    val state = new SimpleState
-  //    val s1 = Observable.range(0, iterations, 1)
-  //    val s2 = Observable.range(0, iterations, 1)
-  //    Observable.merge(s1, s2).map(state.updateState).subscribe(inObs)
-  //    inObs.await(4.second)
-  //  }
+  @Benchmark
+  def MonifuMapTwoStreamsSynchronizedState(): Unit = {
+    val inObs = new AwaitableObserver()
+    val outObs = new AwaitableObserver()
+    val state = new SynchState
+    Observable.range(0, iterations, 1).map(state.updateState).subscribe(inObs)
+    Observable.range(0, iterations, 1).map(state.updateState).subscribe(outObs)
+    inObs.await(4.second)
+    outObs.await(4.second)
+  }
 
   @Benchmark
   def MonifuMergeAndGroupBy(): Unit = {
