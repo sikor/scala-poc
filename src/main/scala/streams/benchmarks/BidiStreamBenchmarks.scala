@@ -104,10 +104,10 @@ class BidiStreamBenchmarks {
 
   @Benchmark
   def BidiStreamOneDirection(): Unit = {
-    def procIn(m: Any): ProcessingAction = {
+    def procIn(m: Long): ProcessingAction[Long, Long] = {
       PushToInput(m)
     }
-    val bidi = new BidiStream(procIn, _ => NoAction)
+    val bidi = new BidiStream(procIn, (_: Any) => NoAction)
     val inObs = new AwaitableObserver()
     bidi.in().subscribe(inObs)
     Observable.range(0, iterations, 1).subscribe(bidi.in())
@@ -117,8 +117,8 @@ class BidiStreamBenchmarks {
 
   @Benchmark
   def BidiStreamAsynchResponse(): Unit = {
-    def proc(m: Any): ProcessingAction = {
-      if (m.asInstanceOf[Long] % 2 == 0) {
+    def proc(m: Long): ProcessingAction[Long, Long] = {
+      if (m % 2 == 0) {
         PushToInput(m)
       } else {
         PushToOutput(m)
@@ -137,8 +137,8 @@ class BidiStreamBenchmarks {
 
   @Benchmark
   def BidiStreamOneWayAsynchResponse(): Unit = {
-    def proc(m: Any): ProcessingAction = {
-      if (m.asInstanceOf[Long] % 2 == 0) {
+    def proc(m: Long): ProcessingAction[Long, Long] = {
+      if (m % 2 == 0) {
         PushToInput(m)
       } else {
         PushToOutput(m)
@@ -157,8 +157,8 @@ class BidiStreamBenchmarks {
 
   @Benchmark
   def BidiStreamBothDirections(): Unit = {
-    def proc(m: Any): ProcessingAction = {
-      if (m.asInstanceOf[Long] % 2 == 0) {
+    def proc(m: Long): ProcessingAction[Long, Long] = {
+      if (m % 2 == 0) {
         PushToInput(m)
       } else {
         PushToOutput(m)

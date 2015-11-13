@@ -46,10 +46,10 @@ object Main {
 
   def bidiTest(): Unit = {
     val state = new SimpleState
-    def procIn(m: Any): ProcessingAction = {
+    def procIn(m: Long): ProcessingAction[Long, Long] = {
       PushToInput(state.updateState(1))
     }
-    def procOut(m: Any): ProcessingAction = {
+    def procOut(m: Long): ProcessingAction[Long, Long] = {
       PushToOutput(state.updateState(1))
     }
     val bidi = new BidiStream(procIn, procOut)

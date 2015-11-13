@@ -24,125 +24,14 @@ private[streams] object BidiStream {
     * Api for processing functions (onInputMessage and onOutputMessage). They takes incoming messages from one of two
     * Observers and return [[ProcessingAction]] containing new message and information to which Subscriber it should be pushed.
     */
-  sealed trait ProcessingAction
+  sealed trait ProcessingAction[+IP, +OP]
 
-  case class PushToInput(msg: Any) extends ProcessingAction
+  case class PushToInput[IP](msg: IP) extends ProcessingAction[IP, Nothing]
 
-  case class PushToOutput(msg: Any) extends ProcessingAction
+  case class PushToOutput[OP](msg: OP) extends ProcessingAction[Nothing, OP]
 
-  case object NoAction extends ProcessingAction
+  case object NoAction extends ProcessingAction[Nothing, Nothing]
 
-  /**
-    * State of subscriber
-    */
-  sealed trait SubscriberState
-
-  case class PendingMessage(msg: Any, ackPromise: Promise[Ack]) extends SubscriberState
-
-  case object WaitingForAck extends SubscriberState
-
-  case object WaitingForMsg extends SubscriberState
-
-  case object Inactive extends SubscriberState
-
-
-  sealed trait BufferedMessage {
-    def ackPromise: Promise[Ack]
-  }
-
-  case class BufferedInputMessage(msg: Any, ackPromise: Promise[Ack]) extends BufferedMessage
-
-  case class BufferedOutputMessage(msg: Any, ackPromise: Promise[Ack]) extends BufferedMessage
-
-  /**
-    *
-    * @param inputSubState input subscriber state
-    * @param outputSubState output subscriber state
-    * @param isLocked Only producer which set this variable to true can call processing functions.
-    * @param bufferedMessage When producer can't call processing function because other producer holds the lock than it puts the
-    *                        action request into this field.
-    * @param inputSub can be set only once.
-    * @param outputSub can be set only once.
-    */
-  case class State(inputSubState: SubscriberState, outputSubState: SubscriberState, isLocked: Boolean, bufferedMessage: BufferedMessage,
-                   inputSub: Subscriber[Any], outputSub: Subscriber[Any])
-
-  /**
-    * Trait which allows performing operations on state in means of input or output Subject.
-    */
-  sealed trait SubjectLens {
-    def setSubscriberState(state: State, subscriberState: SubscriberState): State
-
-    def getSubscriberState(state: State): SubscriberState
-
-    def bufferMessage(state: State, msg: Any, ackPromise: Promise[Ack]): State
-
-    def setSubscriber(state: State, subscriber: Subscriber[Any], subscriberState: SubscriberState): State
-
-    def getSubscriber(state: State): Subscriber[Any]
-
-    def onImmediateContinueUpdate: FastLoopOptimization
-  }
-
-  case object InputLens extends SubjectLens {
-    override def setSubscriberState(state: State, subscriberState: SubscriberState): State = state.copy(inputSubState = subscriberState)
-
-    override def getSubscriberState(state: State): SubscriberState = state.inputSubState
-
-    override def bufferMessage(state: State, msg: Any, ackPromise: Promise[Ack]): State = state.copy(bufferedMessage = BufferedInputMessage(msg, ackPromise))
-
-    override def setSubscriber(state: State, subscriber: Subscriber[Any], subscriberState: SubscriberState): State =
-      state.copy(inputSub = subscriber, inputSubState = subscriberState)
-
-    override def getSubscriber(state: State): Subscriber[Any] = state.inputSub
-
-    override def onImmediateContinueUpdate: FastLoopOptimization = FastLoopOptimization(InputLens)
-  }
-
-  case object OutputLens extends SubjectLens {
-    override def setSubscriberState(state: State, subscriberState: SubscriberState): State = state.copy(outputSubState = subscriberState)
-
-    override def getSubscriberState(state: State): SubscriberState = state.outputSubState
-
-    override def bufferMessage(state: State, msg: Any, ackPromise: Promise[Ack]): State = state.copy(bufferedMessage = BufferedOutputMessage(msg, ackPromise))
-
-    override def setSubscriber(state: State, subscriber: Subscriber[Any], subscriberState: SubscriberState): State =
-      state.copy(outputSub = subscriber, outputSubState = subscriberState)
-
-    override def getSubscriber(state: State): Subscriber[Any] = state.outputSub
-
-    override def onImmediateContinueUpdate: FastLoopOptimization = FastLoopOptimization(OutputLens)
-  }
-
-
-  /**
-    * We keep [[State]] inside atomic reference. Updates to it are made using compareAndSet. The updates are described
-    * by instances of classes implementing this trait.
-    */
-  sealed trait AtomicUpdate
-
-
-  /**
-    * Means that if we saw old state and compareAndSet failed than algorithm should not be repeated.
-    * (Algorithm could perform side effects)
-    * Fresh state should be modified using stateMod function.
-    */
-  sealed trait ChangeStateAndEffectUpdate extends AtomicUpdate {
-    val stateMod: State => State
-    val effect: () => Future[Ack]
-  }
-
-  case class ChangeStateAndEffect(stateMod: State => State, effect: () => Future[Ack]) extends ChangeStateAndEffectUpdate
-
-  case class FastLoopOptimization(lens: SubjectLens) extends ChangeStateAndEffectUpdate {
-    override val stateMod: (State) => State = s => lens.setSubscriberState(s, WaitingForMsg)
-    override val effect: () => Future[Ack] = () => Continue
-  }
-
-  /**
-    * Means that algorithm which constructed this effect should be repeated if expected state does not match
-    */
-  case class NewStateAndEffect(newState: State, effect: () => Future[Ack]) extends AtomicUpdate
 
 }
 
@@ -162,9 +51,8 @@ private[streams] object BidiStream {
   * @param onInputMessage will be called for each message from input subject
   * @param onOutputMessage will be called for each message from output subject
   */
-class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any => ProcessingAction) {
-  type Msg = Any
-
+class BidiStream[IC, IP, OC, OP](onInputMessage: IC => ProcessingAction[IP, OP],
+                                 onOutputMessage: OC => ProcessingAction[IP, OP]) {
 
   private[this] val stateRef = new AtomicReference[State](State(Inactive, Inactive, isLocked = false, null, null, null))
   private[this] val completedProducersCount = Atomic(0)
@@ -173,14 +61,14 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
   private[this] val input = new EntangledSubject(onInputMessage, InputLens)
   private[this] val output = new EntangledSubject(onOutputMessage, OutputLens)
 
-  def in(): Subject[Msg, Msg] = input
+  def in(): Subject[IC, IP] = input
 
-  def out(): Subject[Msg, Msg] = output
+  def out(): Subject[OC, OP] = output
 
-  class EntangledSubject(val processingFunction: Msg => ProcessingAction, val subjectLens: SubjectLens) extends Subject[Msg, Msg] {
+  class EntangledSubject[C, P](val processingFunction: C => ProcessingAction[IP, OP], val subjectLens: SubjectLens[C, P]) extends Subject[C, P] {
 
     @tailrec
-    final override def onSubscribe(subscriber: Subscriber[Msg]): Unit = {
+    final override def onSubscribe(subscriber: Subscriber[P]): Unit = {
       val seenState = stateRef.get
       if (subjectLens.getSubscriber(seenState) != null) {
         subscriber.onError(new IllegalStateException("Cannot subscribe twice to a one subject of BidiStream"))
@@ -201,7 +89,7 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
 
 
     @tailrec
-    final override def onNext(msg: Msg): Future[Ack] = {
+    final override def onNext(msg: C): Future[Ack] = {
       //if producer is let in into onNext message it means that following hold:
       //there is no buffered message
       //both subscribers have no pending messages
@@ -222,7 +110,7 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
       }
     }
 
-    private def onNextUnderLock(state: State, msg: Msg): Future[Ack] = {
+    private def onNextUnderLock(state: State, msg: C): Future[Ack] = {
       val ackFut = try {
         val result = processingFunction(msg)
         processResult(state, result)
@@ -279,7 +167,7 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     * it would be changed from WaitingForMessage -> WaitingForMessage.
     */
   @tailrec
-  private def processResult(state: State, action: ProcessingAction): Future[Ack] = {
+  private def processResult(state: State, action: ProcessingAction[IP, OP]): Future[Ack] = {
     val res = action match {
       case PushToInput(msg) => pushMsg(state, msg, InputLens)
       case PushToOutput(msg) => pushMsg(state, msg, OutputLens)
@@ -289,7 +177,7 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
       //here we can do fast loop optimization if we immediately got Continue from subscriber. In such situation we don't
       //change the state from WaitingForMessage to WaitingForAck. The state just remains WaitingForMessage and we have one
       //compareAndSet operation less.
-      case fast: FastLoopOptimization => Continue
+      case fast: FastLoopOptimization[IP, OP] => Continue
       case NewStateAndEffect(newState, effect) =>
         if (!compareAndSet(state, newState)) {
           processResult(stateRef.get, action)
@@ -301,12 +189,12 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     }
   }
 
-  private def pushMsg(s: State, msg: Msg, lens: SubjectLens): AtomicUpdate = {
+  private def pushMsg[C, P](s: State, msg: P, lens: SubjectLens[C, P]): AtomicUpdate = {
     lens.getSubscriberState(s) match {
       case WaitingForMsg => pushToSubscriber(msg, lens.getSubscriber(s), lens)
       case WaitingForAck => val promise = Promise[Ack]
         NewStateAndEffect(lens.setSubscriberState(s, PendingMessage(msg, promise)), () => promise.future)
-      case m: PendingMessage => NewStateAndEffect(s, () => {
+      case m: PendingMessage[P] => NewStateAndEffect(s, () => {
         val err = new IllegalStateException("got next message before earlier was processed")
         onProducerFinished(err)
         Future.failed(err)
@@ -329,7 +217,7 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     * The only state element we rely on in this method is subscriber state which won't be changed concurrently (see above).
     * Thus our state change is unrelated to other state changes and we just return the function which modify the state.
     */
-  private def pushToSubscriber(msg: Msg, sub: Subscriber[Msg], subjectLens: SubjectLens): ChangeStateAndEffectUpdate = {
+  private def pushToSubscriber[C, P](msg: P, sub: Subscriber[P], subjectLens: SubjectLens[C, P]): ChangeStateAndEffectUpdate = {
     val subAck: Future[Ack] = sub.onNext(msg) //we call subscriber immediately
     if (subAck == Continue) {
       subjectLens.onImmediateContinueUpdate
@@ -366,7 +254,7 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     * So this method call onProducerFinish in such situation.
     */
   @tailrec
-  private def onSubscriberAck(state: State, sub: Subscriber[Msg], subscriberLens: SubjectLens, ack: Try[Ack]): Future[Ack] = {
+  private def onSubscriberAck[C, P](state: State, sub: Subscriber[P], subscriberLens: SubjectLens[C, P], ack: Try[Ack]): Future[Ack] = {
     val res: AtomicUpdate = ack match {
       case Success(a) =>
         a match {
@@ -440,7 +328,7 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     * method.
     */
   @tailrec
-  private def completeSubscriber(state: State, lens: SubjectLens): Unit = {
+  private def completeSubscriber[C, P](state: State, lens: SubjectLens[C, P]): Unit = {
     val subscriber = lens.getSubscriber(state)
     val result = lens.getSubscriberState(state) match {
       case WaitingForMsg => NewStateAndEffect(lens.setSubscriberState(state, Inactive), () => {
@@ -458,7 +346,7 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     //ignore result.effect
   }
 
-  private def notifyAboutCompletion(sub: Subscriber[Any]): Unit = {
+  private def notifyAboutCompletion[T](sub: Subscriber[T]): Unit = {
     if (errors.size() == 0) {
       sub.onComplete()
     } else if (errors.size() == 1) {
@@ -483,4 +371,117 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     (curState eq expectedState) && stateRef.compareAndSet(expectedState, newState)
   }
 
+  /**
+    * State of subscriber
+    */
+  sealed trait SubscriberState[+P]
+
+  case class PendingMessage[P](msg: P, ackPromise: Promise[Ack]) extends SubscriberState[P]
+
+  case object WaitingForAck extends SubscriberState[Nothing]
+
+  case object WaitingForMsg extends SubscriberState[Nothing]
+
+  case object Inactive extends SubscriberState[Nothing]
+
+
+  sealed trait BufferedMessage {
+    def ackPromise: Promise[Ack]
+  }
+
+  case class BufferedInputMessage(msg: IC, ackPromise: Promise[Ack]) extends BufferedMessage
+
+  case class BufferedOutputMessage(msg: OC, ackPromise: Promise[Ack]) extends BufferedMessage
+
+  /**
+    *
+    * @param inputSubState input subscriber state
+    * @param outputSubState output subscriber state
+    * @param isLocked Only producer which set this variable to true can call processing functions.
+    * @param bufferedMessage When producer can't call processing function because other producer holds the lock than it puts the
+    *                        action request into this field.
+    * @param inputSub can be set only once.
+    * @param outputSub can be set only once.
+    */
+  case class State(inputSubState: SubscriberState[IP], outputSubState: SubscriberState[OP], isLocked: Boolean, bufferedMessage: BufferedMessage,
+                   inputSub: Subscriber[IP], outputSub: Subscriber[OP])
+
+  /**
+    * Trait which allows performing operations on state in means of input or output Subject.
+    */
+  sealed trait SubjectLens[C, P] {
+    type SubscriberStateT = SubscriberState[P]
+    type SubscriberT = Subscriber[P]
+    def setSubscriberState(state: State, subscriberState: SubscriberStateT): State
+
+    def getSubscriberState(state: State): SubscriberStateT
+
+    def bufferMessage(state: State, msg: C, ackPromise: Promise[Ack]): State
+
+    def setSubscriber(state: State, subscriber: SubscriberT, subscriberState: SubscriberStateT): State
+
+    def getSubscriber(state: State): SubscriberT
+
+    def onImmediateContinueUpdate: FastLoopOptimization[C, P]
+  }
+
+  case object InputLens extends SubjectLens[IC, IP] {
+    override def setSubscriberState(state: State, subscriberState: SubscriberStateT): State = state.copy(inputSubState = subscriberState)
+
+    override def getSubscriberState(state: State): SubscriberStateT = state.inputSubState
+
+    override def bufferMessage(state: State, msg: IC, ackPromise: Promise[Ack]): State = state.copy(bufferedMessage = BufferedInputMessage(msg, ackPromise))
+
+    override def setSubscriber(state: State, subscriber: Subscriber[IP], subscriberState: SubscriberState[IP]): State =
+      state.copy(inputSub = subscriber, inputSubState = subscriberState)
+
+    override def getSubscriber(state: State): Subscriber[IP] = state.inputSub
+
+    override def onImmediateContinueUpdate: FastLoopOptimization[IC, IP] = FastLoopOptimization(InputLens)
+  }
+
+  case object OutputLens extends SubjectLens[OC, OP] {
+    override def setSubscriberState(state: State, subscriberState: SubscriberState[OP]): State = state.copy(outputSubState = subscriberState)
+
+    override def getSubscriberState(state: State): SubscriberState[OP] = state.outputSubState
+
+    override def bufferMessage(state: State, msg: OC, ackPromise: Promise[Ack]): State = state.copy(bufferedMessage = BufferedOutputMessage(msg, ackPromise))
+
+    override def setSubscriber(state: State, subscriber: Subscriber[OP], subscriberState: SubscriberState[OP]): State =
+      state.copy(outputSub = subscriber, outputSubState = subscriberState)
+
+    override def getSubscriber(state: State): Subscriber[OP] = state.outputSub
+
+    override def onImmediateContinueUpdate: FastLoopOptimization[OC, OP] = FastLoopOptimization(OutputLens)
+  }
+
+
+  /**
+    * We keep [[State]] inside atomic reference. Updates to it are made using compareAndSet. The updates are described
+    * by instances of classes implementing this trait.
+    */
+  sealed trait AtomicUpdate
+
+
+  /**
+    * Means that if we saw old state and compareAndSet failed than algorithm should not be repeated.
+    * (Algorithm could perform side effects)
+    * Fresh state should be modified using stateMod function.
+    */
+  sealed trait ChangeStateAndEffectUpdate extends AtomicUpdate {
+    val stateMod: State => State
+    val effect: () => Future[Ack]
+  }
+
+  case class ChangeStateAndEffect(stateMod: State => State, effect: () => Future[Ack]) extends ChangeStateAndEffectUpdate
+
+  case class FastLoopOptimization[P, C](lens: SubjectLens[P, C]) extends ChangeStateAndEffectUpdate {
+    override val stateMod: (State) => State = s => lens.setSubscriberState(s, WaitingForMsg)
+    override val effect: () => Future[Ack] = () => Continue
+  }
+
+  /**
+    * Means that algorithm which constructed this effect should be repeated if expected state does not match
+    */
+  case class NewStateAndEffect(newState: State, effect: () => Future[Ack]) extends AtomicUpdate
 }

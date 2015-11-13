@@ -39,14 +39,14 @@ class BidiStreamTest extends FunSuite with Matchers {
   test("Processor functions should be called atomically") {
     val processingEvents = new ConcurrentLinkedQueue[String]()
     val random = new Random()
-    def procIn(m: Any): ProcessingAction = {
+    def procIn(m: Long): ProcessingAction[Long, Long] = {
       processingEvents.add("procIn-start")
       Thread.sleep(1 + random.nextInt(9))
       processingEvents.add("procIn-end")
       PushToInput(m)
     }
 
-    def procOut(m: Any): ProcessingAction = {
+    def procOut(m: Long): ProcessingAction[Long, Long] = {
       processingEvents.add("procOut-start")
       Thread.sleep(5 + random.nextInt(5))
       processingEvents.add("procOut-end")
@@ -72,11 +72,11 @@ class BidiStreamTest extends FunSuite with Matchers {
   test("Messages from one source routed to one sink") {
     val inputMessages = new ConcurrentLinkedQueue[Long]()
     val outputMessages = new ConcurrentLinkedQueue[Long]()
-    def procIn(m: Any): ProcessingAction = {
+    def procIn(m: Long): ProcessingAction[Long, Long] = {
       PushToInput(m)
     }
 
-    def procOut(m: Any): ProcessingAction = {
+    def procOut(m: Long): ProcessingAction[Long, Long] = {
       PushToOutput(m)
     }
     val bidi = new BidiStream(procIn, procOut)
@@ -108,11 +108,11 @@ class BidiStreamTest extends FunSuite with Matchers {
   test("All incoming messages pushed to one sink") {
     val inputMessages = new util.HashSet[Long]()
     val outputMessages = new util.HashSet[Long]()
-    def procIn(m: Any): ProcessingAction = {
+    def procIn(m: Long): ProcessingAction[Long, Long] = {
       PushToInput(m)
     }
 
-    def procOut(m: Any): ProcessingAction = {
+    def procOut(m: Long): ProcessingAction[Long, Long] = {
       PushToInput(m)
     }
     val bidi = new BidiStream(procIn, procOut)
@@ -136,11 +136,11 @@ class BidiStreamTest extends FunSuite with Matchers {
 
   test("Should work with only one input and one output") {
     val inputMessages = new ConcurrentLinkedQueue[Long]()
-    def procIn(m: Any): ProcessingAction = {
+    def procIn(m: Long): ProcessingAction[Long, Long] = {
       PushToInput(m)
     }
 
-    def procOut(m: Any): ProcessingAction = {
+    def procOut(m: Long): ProcessingAction[Long, Long] = {
       PushToOutput(m)
     }
     val bidi = new BidiStream(procIn, procOut)
@@ -159,11 +159,11 @@ class BidiStreamTest extends FunSuite with Matchers {
     val inputMessages = new ConcurrentLinkedQueue[Long]()
     val outputMessages = new ConcurrentLinkedQueue[Long]()
     val random = new Random()
-    def procIn(m: Any): ProcessingAction = {
+    def procIn(m: Long): ProcessingAction[Long, Long] = {
       PushToInput(m)
     }
 
-    def procOut(m: Any): ProcessingAction = {
+    def procOut(m: Long): ProcessingAction[Long, Long] = {
       PushToOutput(m)
     }
     def scheduleResponse(): Future[Ack] = {
