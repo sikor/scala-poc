@@ -29,12 +29,21 @@ import scala.concurrent.duration._
   * [info] BidiStreamBenchmarks.MonifuMergeAndGroupBy              thrpt    5   3.549 ± 0.089  ops/s
   * [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneDirection  thrpt    5  10.571 ± 0.326  ops/s
   *
-  * Improvement after removing one unnecessary compareAndSet and defining untied state modifications
+  * Improvement after removing one unnecessary compareAndSet
   * [info] Benchmark                                                Mode  Cnt   Score   Error  Units
   * [info] BidiStreamBenchmarks.BidiStreamBothDirections           thrpt    5   5.305 ± 0.174  ops/s
   * [info] BidiStreamBenchmarks.BidiStreamOneDirection             thrpt    5  11.248 ± 0.263  ops/s
   * [info] BidiStreamBenchmarks.MonifuMergeAndGroupBy              thrpt    5   3.568 ± 0.024  ops/s
   * [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneDirection  thrpt    5  10.676 ± 0.428  ops/s
+  *
+  * Improvement after fast loop optimization
+  * [info] Benchmark                                                   Mode  Cnt   Score   Error  Units
+  * [info] BidiStreamBenchmarks.BidiStreamBothDirections              thrpt    5   8.655 ± 0.447  ops/s
+  * [info] BidiStreamBenchmarks.BidiStreamOneDirection                thrpt    5  19.052 ± 0.596  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMapTwoStreamsSynchronizedState  thrpt    5  27.948 ± 0.695  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupBy                 thrpt    5   3.915 ± 0.065  ops/s
+  * [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneDirection     thrpt    5  11.774 ± 0.268  ops/s
+  *
   *
   * Executor with 4 threads:
   *
@@ -67,7 +76,7 @@ object BidiStreamBenchmarks {
           th
         }
       }),
-      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(8, new ThreadFactory {
+      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1, new ThreadFactory {
         override def newThread(r: Runnable): Thread = {
           val th = new Thread(r)
           th.setDaemon(true)
@@ -83,7 +92,7 @@ class BidiStreamBenchmarks {
 
   import BidiStreamBenchmarks._
 
-  //
+
   @Benchmark
   def BidiStreamOneDirection(): Unit = {
     def procIn(m: Any): ProcessingAction = {

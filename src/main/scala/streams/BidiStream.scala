@@ -45,84 +45,102 @@ private[streams] object BidiStream {
 
   case object Inactive extends SubscriberState
 
-  /**
-    * State of shared state
-    */
-  sealed trait Lock
 
-  case object Locked extends Lock
-
-  case object Unlocked extends Lock
-
-  sealed trait DeferredAction {
+  sealed trait BufferedMessage {
     def ackPromise: Promise[Ack]
   }
 
-  case class IncomingInputMessage(msg: Any, ackPromise: Promise[Ack]) extends DeferredAction
+  case class BufferedInputMessage(msg: Any, ackPromise: Promise[Ack]) extends BufferedMessage
 
-  case class IncomingOutputMessage(msg: Any, ackPromise: Promise[Ack]) extends DeferredAction
+  case class BufferedOutputMessage(msg: Any, ackPromise: Promise[Ack]) extends BufferedMessage
 
   /**
     *
     * @param inputSubState input subscriber state
     * @param outputSubState output subscriber state
-    * @param lock Only producer which set this variable to [[Locked]] can call processing functions.
-    * @param action When producer can't call processing function because other producer holds the lock than it puts the
-    *               action request into this field.
+    * @param isLocked Only producer which set this variable to true can call processing functions.
+    * @param bufferedMessage When producer can't call processing function because other producer holds the lock than it puts the
+    *                        action request into this field.
     * @param inputSub can be set only once.
     * @param outputSub can be set only once.
     */
-  case class State(inputSubState: SubscriberState, outputSubState: SubscriberState, lock: Lock, action: DeferredAction,
+  case class State(inputSubState: SubscriberState, outputSubState: SubscriberState, isLocked: Boolean, bufferedMessage: BufferedMessage,
                    inputSub: Subscriber[Any], outputSub: Subscriber[Any])
 
-  sealed trait StateLens {
+  /**
+    * Trait which allows performing operations on state in means of input or output Subject.
+    */
+  sealed trait SubjectLens {
     def setSubscriberState(state: State, subscriberState: SubscriberState): State
 
     def getSubscriberState(state: State): SubscriberState
 
-    def deferAction(state: State, msg: Any, ackPromise: Promise[Ack]): State
+    def bufferMessage(state: State, msg: Any, ackPromise: Promise[Ack]): State
 
     def setSubscriber(state: State, subscriber: Subscriber[Any], subscriberState: SubscriberState): State
 
     def getSubscriber(state: State): Subscriber[Any]
+
+    def onImmediateContinueUpdate: FastLoopOptimization
   }
 
-  case object InputLens extends StateLens {
+  case object InputLens extends SubjectLens {
     override def setSubscriberState(state: State, subscriberState: SubscriberState): State = state.copy(inputSubState = subscriberState)
 
     override def getSubscriberState(state: State): SubscriberState = state.inputSubState
 
-    override def deferAction(state: State, msg: Any, ackPromise: Promise[Ack]): State = state.copy(action = IncomingInputMessage(msg, ackPromise))
+    override def bufferMessage(state: State, msg: Any, ackPromise: Promise[Ack]): State = state.copy(bufferedMessage = BufferedInputMessage(msg, ackPromise))
 
     override def setSubscriber(state: State, subscriber: Subscriber[Any], subscriberState: SubscriberState): State =
       state.copy(inputSub = subscriber, inputSubState = subscriberState)
 
     override def getSubscriber(state: State): Subscriber[Any] = state.inputSub
+
+    override def onImmediateContinueUpdate: FastLoopOptimization = FastLoopOptimization(InputLens)
   }
 
-  case object OutputLens extends StateLens {
+  case object OutputLens extends SubjectLens {
     override def setSubscriberState(state: State, subscriberState: SubscriberState): State = state.copy(outputSubState = subscriberState)
 
     override def getSubscriberState(state: State): SubscriberState = state.outputSubState
 
-    override def deferAction(state: State, msg: Any, ackPromise: Promise[Ack]): State = state.copy(action = IncomingOutputMessage(msg, ackPromise))
+    override def bufferMessage(state: State, msg: Any, ackPromise: Promise[Ack]): State = state.copy(bufferedMessage = BufferedOutputMessage(msg, ackPromise))
 
     override def setSubscriber(state: State, subscriber: Subscriber[Any], subscriberState: SubscriberState): State =
       state.copy(outputSub = subscriber, outputSubState = subscriberState)
 
     override def getSubscriber(state: State): Subscriber[Any] = state.outputSub
+
+    override def onImmediateContinueUpdate: FastLoopOptimization = FastLoopOptimization(OutputLens)
   }
 
+
+  /**
+    * We keep [[State]] inside atomic reference. Updates to it are made using compareAndSet. The updates are described
+    * by instances of classes implementing this trait.
+    */
   sealed trait AtomicUpdate
 
-  /**
-    * Means that in case of update compareAndSet failure flow should not be repeated.
-    * Fresh state should be modified using [[stateMod]] function.
-    */
-  case class ChangeStateAndDoAction(stateMod: State => State, effect: () => Future[Ack]) extends AtomicUpdate
 
   /**
-    * Means that flow which constructed this effect should be repeated if expected state does not match
+    * Means that if we saw old state and compareAndSet failed than algorithm should not be repeated.
+    * (Algorithm could perform side effects)
+    * Fresh state should be modified using stateMod function.
+    */
+  sealed trait ChangeStateAndEffectUpdate extends AtomicUpdate {
+    val stateMod: State => State
+    val effect: () => Future[Ack]
+  }
+
+  case class ChangeStateAndEffect(stateMod: State => State, effect: () => Future[Ack]) extends ChangeStateAndEffectUpdate
+
+  case class FastLoopOptimization(lens: SubjectLens) extends ChangeStateAndEffectUpdate {
+    override val stateMod: (State) => State = s => lens.setSubscriberState(s, WaitingForMsg)
+    override val effect: () => Future[Ack] = () => Continue
+  }
+
+  /**
+    * Means that algorithm which constructed this effect should be repeated if expected state does not match
     */
   case class NewStateAndEffect(newState: State, effect: () => Future[Ack]) extends AtomicUpdate
 
@@ -132,7 +150,7 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
   type Msg = Any
 
 
-  private[this] val stateRef = new AtomicReference[State](State(Inactive, Inactive, Unlocked, null, null, null))
+  private[this] val stateRef = new AtomicReference[State](State(Inactive, Inactive, isLocked = false, null, null, null))
   private[this] val completedCount = Atomic(0)
   private[this] val errors = new ConcurrentLinkedQueue[Throwable]()
 
@@ -143,91 +161,58 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
 
   def out(): Subject[Msg, Msg] = output
 
-  private def compareAndSet(expectedState: State, newState: State): Boolean = {
-    val curState: State = stateRef.get()
-    (curState eq expectedState) && stateRef.compareAndSet(expectedState, newState)
-  }
-
-  private def onConsumerFinished(e: Throwable = null): Unit = {
-    if (e != null) {
-      errors.add(e)
-    }
-    // we won't get any new messages so complete our consumers (subscribers)
-    if (completedCount.incrementAndGet() == 2) {
-      val state = stateRef.get
-      completeSubscriber(state, InputLens)
-      completeSubscriber(state, OutputLens)
-    }
-  }
-
-  private def completeSubscriber(state: State, lens: StateLens): Unit = {
-    if (lens.getSubscriberState(state) != Inactive) {
-      val sub = lens.getSubscriber(state)
-      if (errors.size() == 0) {
-        sub.onComplete()
-      } else if (errors.size() == 1) {
-        sub.onError(errors.peek())
-      } else if (errors.size() > 1) {
-        // We can't get more than 2 errors in total
-        // because if we get error in onNext processing it means that one of consumers was waiting for message and
-        // if we get error from consumer Future[Ack] it means that one of producer won't give us next message
-        sub.onError(new CompositeException(errors.toSeq))
-      }
-    }
-  }
-
-  class EntangledSubject(val processingFunction: Msg => ProcessingAction, val stateLens: StateLens) extends Subject[Msg, Msg] {
+  class EntangledSubject(val processingFunction: Msg => ProcessingAction, val subjectLens: SubjectLens) extends Subject[Msg, Msg] {
 
     @tailrec
     final override def onSubscribe(subscriber: Subscriber[Msg]): Unit = {
       val seenState = stateRef.get
-      if (stateLens.getSubscriber(seenState) != null) {
+      if (subjectLens.getSubscriber(seenState) != null) {
         subscriber.onError(new IllegalStateException("Cannot subscribe twice to a one subject of BidiStream"))
       } else {
-        if (!compareAndSet(seenState, stateLens.setSubscriber(seenState, subscriber, WaitingForMsg))) {
+        if (!compareAndSet(seenState, subjectLens.setSubscriber(seenState, subscriber, WaitingForMsg))) {
           onSubscribe(subscriber)
         }
       }
     }
 
     override def onError(ex: Throwable): Unit = {
-      onConsumerFinished(ex)
+      onProducerFinished(ex)
     }
 
     override def onComplete(): Unit = {
-      onConsumerFinished()
+      onProducerFinished()
     }
 
 
     @tailrec
     final override def onNext(msg: Msg): Future[Ack] = {
-      val seenState = stateRef.get
-      //if producer is let in into onNext message it means that following should hold:
+      //if producer is let in into onNext message it means that following hold:
       //there is no buffered message
       //both subscribers have no pending messages
       //one of subscribers can consume message
 
-
-      val res = seenState.lock match {
-        case Unlocked => ChangeStateAndDoAction(s => s.copy(lock = Locked), ifUnlocked(msg))
-        case Locked => val promise = Promise[Ack]()
-          ChangeStateAndDoAction(s => stateLens.deferAction(s, msg, promise), () => promise.future)
+      val seenState = stateRef.get
+      val res = if (!seenState.isLocked) {
+        val newState = seenState.copy(isLocked = true)
+        NewStateAndEffect(newState, () => onNextUnderLock(newState, msg))
+      } else {
+        val promise = Promise[Ack]()
+        NewStateAndEffect(subjectLens.bufferMessage(seenState, msg, promise), () => promise.future)
       }
-      if (!compareAndSet(seenState, res.stateMod(seenState))) {
+      if (!compareAndSet(seenState, res.newState)) {
         onNext(msg)
       } else {
         res.effect()
       }
     }
 
-
-    private def ifUnlocked(msg: Msg)(): Future[Ack] = {
+    private def onNextUnderLock(state: State, msg: Msg): Future[Ack] = {
       val ackFut = try {
         val result = processingFunction(msg)
-        processResult(stateRef.get(), result)
+        processResult(state, result)
       } catch {
         case NonFatal(e) =>
-          onConsumerFinished(e)
+          onProducerFinished(e)
           Future.failed(e)
       }
       unlockState(stateRef.get())
@@ -236,8 +221,40 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
 
   }
 
+  @tailrec
+  private def unlockState(state: State): Unit = {
+    if (state.bufferedMessage != null) {
+      val bufferedMessageAck = try {
+        state.bufferedMessage match {
+          case BufferedInputMessage(msg, _) => processResult(state, onInputMessage(msg))
+          case BufferedOutputMessage(msg, _) => processResult(state, onOutputMessage(msg))
+        }
+      } catch {
+        case NonFatal(e) =>
+          onProducerFinished(e)
+          Future.failed(e)
+      }
+      unlockAfterSendingBufferedMessage(state)
+      // only after clearing pending action and unlocking we can send ack to producer which was rejected:
+      state.bufferedMessage.ackPromise.completeWith(bufferedMessageAck)
+    } else {
+      if (!compareAndSet(state, state.copy(isLocked = false))) {
+        unlockState(stateRef.get())
+      }
+    }
+  }
+
+
+  @tailrec
+  private def unlockAfterSendingBufferedMessage(state: State): Unit = {
+    if (!compareAndSet(state, state.copy(isLocked = false, bufferedMessage = null))) {
+      unlockAfterSendingBufferedMessage(stateRef.get())
+    }
+  }
+
+
   /**
-    * Access to this method is synchronized using [[State.lock]].
+    * Access to this method is synchronized using [[State.isLocked]].
     * It can modify the state of the subscriber.
     * The state of the subscriber can be also modified when we get onAck callback.
     * But if inside this method we see that subscriber is in WaitingForMsg state it means that it won't send onAck callback.
@@ -253,29 +270,34 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
       case NoAction => NewStateAndEffect(state, () => Continue)
     }
     res match {
+      //here we can do fast loop optimization if we immediately got Continue from subscriber. In such situation we don't
+      //change the state from WaitingForMessage to WaitingForAck. The state just remains WaitingForMessage and we have one
+      //compareAndSet operation less.
+      case fast: FastLoopOptimization => Continue
       case NewStateAndEffect(newState, effect) =>
         if (!compareAndSet(state, newState)) {
           processResult(stateRef.get, action)
         } else {
           effect()
         }
-      case ch: ChangeStateAndDoAction => runChangeState(state, ch)
+      case ch: ChangeStateAndEffect =>
+        runChangeState(state, ch)
     }
   }
 
-  private def pushMsg(s: State, msg: Msg, lens: StateLens): AtomicUpdate = {
+  private def pushMsg(s: State, msg: Msg, lens: SubjectLens): AtomicUpdate = {
     lens.getSubscriberState(s) match {
       case WaitingForMsg => pushToSubscriber(msg, lens.getSubscriber(s), lens)
       case WaitingForAck => val promise = Promise[Ack]
         NewStateAndEffect(lens.setSubscriberState(s, PendingMessage(msg, promise)), () => promise.future)
       case m: PendingMessage => NewStateAndEffect(s, () => {
         val err = new IllegalStateException("got next message before earlier was processed")
-        onConsumerFinished(err)
+        onProducerFinished(err)
         Future.failed(err)
       })
       case Inactive => NewStateAndEffect(s, () => {
         val err = new IllegalStateException("Subscriber is inactive")
-        onConsumerFinished(err)
+        onProducerFinished(err)
         Future.failed(err)
       })
     }
@@ -285,34 +307,35 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     * When we call this method subscriber has to be in WaitingForMessage state.
     * It means that nobody but us can change subscriber state.
     * Thus we can send the message and modify the state afterwards.
-    * We don't have to change the state from WaitingForMessage to WaitingForAck before sending the message, we can do it later.
+    * We don't have to change the state from WaitingForMessage to WaitingForAck before sending the message, we can do it after
+    * receiving the the [[Future[Ack]]]. Thanks to that we can do fastLoop and don't change the state to WaitingForAck but just stay in WaitingForMsg.
     * State has to be changed before registering onComplete callback on subscriber future and before unlocking/sending buffered message.
     * The only state element we rely on in this method is subscriber state which won't be changed concurrently (see above).
     * Thus our state change is unrelated to other state changes and we just return the function which modify the state.
     */
-  private def pushToSubscriber(msg: Msg, sub: Subscriber[Msg], subStateLens: StateLens): ChangeStateAndDoAction = {
-    val subAck: Future[Ack] = sub.onNext(msg)
+  private def pushToSubscriber(msg: Msg, sub: Subscriber[Msg], subjectLens: SubjectLens): ChangeStateAndEffectUpdate = {
+    val subAck: Future[Ack] = sub.onNext(msg) //we call subscriber immediately
     if (subAck == Continue) {
-      ChangeStateAndDoAction(s => subStateLens.setSubscriberState(s, WaitingForMsg), () => Continue)
+      subjectLens.onImmediateContinueUpdate
     } else if (subAck.isCompleted) {
       subAck.value.get match {
         case Success(a) => a match {
-          case Continue => ChangeStateAndDoAction(s => subStateLens.setSubscriberState(s, WaitingForMsg), () => Continue)
-          case Cancel => ChangeStateAndDoAction(s => subStateLens.setSubscriberState(s, Inactive), () => {
-            onConsumerFinished() //we are sending cancel to our producer so it is finished.
+          case Continue => ChangeStateAndEffect(s => subjectLens.setSubscriberState(s, WaitingForMsg), () => Continue)
+          case Cancel => ChangeStateAndEffect(s => subjectLens.setSubscriberState(s, Inactive), () => {
+            onProducerFinished() //we are sending cancel to our producer so it is finished.
             Cancel
           })
         }
-        case Failure(t) => ChangeStateAndDoAction(s => subStateLens.setSubscriberState(s, Inactive), () => {
+        case Failure(t) => ChangeStateAndEffect(s => subjectLens.setSubscriberState(s, Inactive), () => {
           //when we complete ack with failure than we should not get any messages from given producer
-          onConsumerFinished(t)
+          onProducerFinished(t)
           Future.failed(t)
         })
       }
     } else {
-      ChangeStateAndDoAction(s => subStateLens.setSubscriberState(s, WaitingForAck), () => {
+      ChangeStateAndEffect(s => subjectLens.setSubscriberState(s, WaitingForAck), () => {
         val producerPromise: Promise[Ack] = Promise()
-        subAck.onComplete(ack => producerPromise.completeWith(onSubscriberAck(stateRef.get(), sub, subStateLens, ack)))(sub.scheduler)
+        subAck.onComplete(ack => producerPromise.completeWith(onSubscriberAck(stateRef.get(), sub, subjectLens, ack)))(sub.scheduler)
         producerPromise.future
       })
 
@@ -320,51 +343,117 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
   }
 
 
+  /**
+    *
+    * Handle asynch, not fast looped response from subscriber. It returns Future which should be propagated to producer which sent the message.
+    * This method change the state of subscriber. When this method don't return Continue it means that producer won't give us next message.
+    * So this method call onProducerFinish in such situation.
+    */
   @tailrec
-  private def onSubscriberAck(state: State, sub: Subscriber[Msg], subStateLens: StateLens, ack: Try[Ack]): Future[Ack] = {
+  private def onSubscriberAck(state: State, sub: Subscriber[Msg], subscriberLens: SubjectLens, ack: Try[Ack]): Future[Ack] = {
     val res: AtomicUpdate = ack match {
       case Success(a) =>
         a match {
           case Continue =>
-            subStateLens.getSubscriberState(state) match {
-              case PendingMessage(pendingMsg, pendingPromise) => //pending message means that both producers are waiting for acks.
-                //State modification is defined in pushToSubscriber method. We assume that before calling this method state is WaitingForMessage
-                val res = pushToSubscriber(pendingMsg, sub, subStateLens)
-                ChangeStateAndDoAction(res.stateMod, () => {
+            subscriberLens.getSubscriberState(state) match {
+              case PendingMessage(pendingMsg, pendingPromise) =>
+                //Pending message state means that both producers are waiting for acks.
+                //So we are owning the state of this subscriber and we can send it message immediately.
+                //We use pushToSubscriber method to get correct state modification.
+                //We assume that before calling pushToSubscriber method state is WaitingForMessage but we don't change the state explicitly
+                val res = pushToSubscriber(pendingMsg, sub, subscriberLens)
+                ChangeStateAndEffect(res.stateMod, () => {
+                  //Bind promise for producer of pending message.
                   pendingPromise.completeWith(res.effect())
+                  //Complete promise for producer for which ack was just received.
                   Continue
                 })
-              case WaitingForAck => NewStateAndEffect(subStateLens.setSubscriberState(state, WaitingForMsg), () => Continue)
-              case _ => NewStateAndEffect(subStateLens.setSubscriberState(state, Inactive), () => {
-                sub.onError(new IllegalStateException())
-                Future.failed(new IllegalStateException())
+              case WaitingForAck => NewStateAndEffect(subscriberLens.setSubscriberState(state, WaitingForMsg), () => Continue)
+              case Inactive => NewStateAndEffect(state, () => {
+                //Should never happen but do best effort in case our clients broke the contract.
+                sub.onComplete()
+                Cancel
+              })
+              case WaitingForMsg => NewStateAndEffect(subscriberLens.setSubscriberState(state, Inactive), () => {
+                //Should never happen
+                val err = new IllegalStateException(s"Got ack when subscriber was in unexpected state: $WaitingForMsg")
+                onProducerFinished(err)
+                sub.onError(err)
+                Future.failed(err)
               })
             }
-          case Cancel => NewStateAndEffect(subStateLens.setSubscriberState(state, Inactive), () => {
-            onConsumerFinished()
+          case Cancel => NewStateAndEffect(subscriberLens.setSubscriberState(state, Inactive), () => {
+            onProducerFinished()
             Cancel
           })
         }
-      case Failure(t) => NewStateAndEffect(subStateLens.setSubscriberState(state, Inactive), () => {
-        //when we complete ack with failure than we should not get any messages from given producer
-        onConsumerFinished(t)
+      case Failure(t) => NewStateAndEffect(subscriberLens.setSubscriberState(state, Inactive), () => {
+        onProducerFinished(t)
         Future.failed(t)
       })
     }
     res match {
       case NewStateAndEffect(newState, effect) =>
         if (!compareAndSet(state, newState)) {
-          onSubscriberAck(stateRef.get, sub, subStateLens, ack)
+          onSubscriberAck(stateRef.get, sub, subscriberLens, ack)
         } else {
           effect()
         }
-      case ch: ChangeStateAndDoAction => runChangeState(state, ch)
+      case ch: ChangeStateAndEffectUpdate => runChangeState(state, ch)
     }
 
   }
 
+
+  private def onProducerFinished(e: Throwable = null): Unit = {
+    if (e != null) {
+      errors.add(e)
+    }
+
+    if (completedCount.incrementAndGet() >= 2) {
+      // we won't get any new messages so complete subscribers
+      val state = stateRef.get
+      completeSubscriber(state, InputLens)
+      completeSubscriber(state, OutputLens)
+    }
+  }
+
+  /**
+    * If this subscriber was waiting for Message than notify it about completion. Otherwise set its state to Inactive.
+    * If we were waiting for ack from this subscriber than it will be notified about completion in [[onSubscriberAck]]
+    * method.
+    */
   @tailrec
-  private def runChangeState(state: State, ch: ChangeStateAndDoAction): Future[Ack] = {
+  private def completeSubscriber(state: State, lens: SubjectLens): Unit = {
+    val subscriber = lens.getSubscriber(state)
+    val result = lens.getSubscriberState(state) match {
+      case WaitingForMsg => NewStateAndEffect(lens.setSubscriberState(state, Inactive), () => {
+        notifyAboutCompletion(subscriber)
+        Cancel
+      })
+      case _ =>
+        NewStateAndEffect(lens.setSubscriberState(state, Inactive), () => Cancel)
+    }
+    if (!compareAndSet(state, result.newState)) {
+      completeSubscriber(stateRef.get(), lens)
+    } else {
+      result.effect()
+    }
+    //ignore result.effect
+  }
+
+  private def notifyAboutCompletion(sub: Subscriber[Any]): Unit = {
+    if (errors.size() == 0) {
+      sub.onComplete()
+    } else if (errors.size() == 1) {
+      sub.onError(errors.peek())
+    } else if (errors.size() > 1) {
+      sub.onError(new CompositeException(errors.toSeq))
+    }
+  }
+
+  @tailrec
+  private def runChangeState(state: State, ch: ChangeStateAndEffectUpdate): Future[Ack] = {
     if (!compareAndSet(state, ch.stateMod(state))) {
       runChangeState(stateRef.get(), ch)
     } else {
@@ -372,34 +461,10 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
     }
   }
 
-  @tailrec
-  private def unlockAfterPendingAction(state: State): Unit = {
-    if (!compareAndSet(state, state.copy(lock = Unlocked, action = null))) {
-      unlockAfterPendingAction(stateRef.get())
-    }
-  }
 
-  @tailrec
-  private def unlockState(state: State): Unit = {
-    if (state.action != null) {
-      val pendingActionProducerFut = try {
-        state.action match {
-          case IncomingInputMessage(msg, _) => processResult(state, onInputMessage(msg))
-          case IncomingOutputMessage(msg, _) => processResult(state, onOutputMessage(msg))
-        }
-      } catch {
-        case NonFatal(e) =>
-          onConsumerFinished(e)
-          Future.failed(e)
-      }
-      unlockAfterPendingAction(state)
-      // only after clearing pending action and unlocking we can send ack to producer which was rejected:
-      state.action.ackPromise.completeWith(pendingActionProducerFut)
-    } else {
-      if (!compareAndSet(state, state.copy(lock = Unlocked))) {
-        unlockState(stateRef.get())
-      }
-    }
+  private def compareAndSet(expectedState: State, newState: State): Boolean = {
+    val curState: State = stateRef.get()
+    (curState eq expectedState) && stateRef.compareAndSet(expectedState, newState)
   }
 
 }
