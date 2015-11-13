@@ -178,8 +178,8 @@ class BidiStreamBenchmarks {
 
   @Benchmark
   def MonifuMapTwoStreamsSynchronizedState(): Unit = {
-    val inObs = new AwaitableObserver(m => scheduleResponse())
-    val outObs = new AwaitableObserver(m => scheduleResponse())
+    val inObs = new AwaitableObserver()
+    val outObs = new AwaitableObserver()
     val state = new SynchState
     Observable.range(0, iterations, 1).map(state.updateState).subscribe(inObs)
     Observable.range(0, iterations, 1).map(state.updateState).subscribe(outObs)
@@ -189,8 +189,8 @@ class BidiStreamBenchmarks {
 
   @Benchmark
   def MonifuMapTwoStreamsSynchronizedStateAsynchResponse(): Unit = {
-    val inObs = new AwaitableObserver()
-    val outObs = new AwaitableObserver()
+    val inObs = new AwaitableObserver(m => scheduleResponse())
+    val outObs = new AwaitableObserver(m => scheduleResponse())
     val state = new SynchState
     Observable.range(0, iterations, 1).map(state.updateState).subscribe(inObs)
     Observable.range(0, iterations, 1).map(state.updateState).subscribe(outObs)
