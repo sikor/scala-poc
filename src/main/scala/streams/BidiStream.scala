@@ -146,12 +146,28 @@ private[streams] object BidiStream {
 
 }
 
+/**
+  *
+  * Stream which contains two subjects that share theirs subscribers and synchronize their producers.
+  * By the producer we mean somebody who call methods on observers in our subjects.
+  * Each subject can be subscribed to at most once. If message will be send to Inactive subscription
+  * (for example when onSubscribe method was never called) than producer of this message will receive failed future.
+  *
+  * Subscribers are notified about completion when both producers are completed.
+  * It is possible to work with one subscriber (two subscribers) and one producer (two producers) under the condition that every message from the producer
+  * will be routed to active subscriber. (In such situation don't forget to call onComplete on subject without
+  * producer to notify the active subscriber when producer will finish work).
+  *
+  * onInputMessage and onOutputMessage are called synchronously and their state modifications will be visible to them.
+  * @param onInputMessage will be called for each message from input subject
+  * @param onOutputMessage will be called for each message from output subject
+  */
 class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any => ProcessingAction) {
   type Msg = Any
 
 
   private[this] val stateRef = new AtomicReference[State](State(Inactive, Inactive, isLocked = false, null, null, null))
-  private[this] val completedCount = Atomic(0)
+  private[this] val completedProducersCount = Atomic(0)
   private[this] val errors = new ConcurrentLinkedQueue[Throwable]()
 
   private[this] val input = new EntangledSubject(onInputMessage, InputLens)
@@ -410,7 +426,7 @@ class BidiStream(onInputMessage: Any => ProcessingAction, onOutputMessage: Any =
       errors.add(e)
     }
 
-    if (completedCount.incrementAndGet() >= 2) {
+    if (completedProducersCount.incrementAndGet() >= 2) {
       // we won't get any new messages so complete subscribers
       val state = stateRef.get
       completeSubscriber(state, InputLens)

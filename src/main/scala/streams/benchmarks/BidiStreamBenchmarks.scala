@@ -5,13 +5,13 @@ import java.util.concurrent.{Executors, ThreadFactory}
 import monifu.concurrent.schedulers.AsyncScheduler
 import monifu.concurrent.{Scheduler, UncaughtExceptionReporter}
 import monifu.reactive.Ack.Continue
-import monifu.reactive.Observable
+import monifu.reactive.{Ack, Observable}
 import org.openjdk.jmh.annotations.Benchmark
 import streams.BidiStream
 import streams.BidiStream.{NoAction, ProcessingAction, PushToInput, PushToOutput}
 
-import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future, Promise}
 
 /**
   *
@@ -65,7 +65,6 @@ import scala.concurrent.duration._
   */
 object BidiStreamBenchmarks {
   val iterations = 1000000
-
   implicit val globalScheduler: Scheduler =
     AsyncScheduler(
       Executors.newSingleThreadScheduledExecutor(new ThreadFactory {
@@ -76,7 +75,7 @@ object BidiStreamBenchmarks {
           th
         }
       }),
-      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1, new ThreadFactory {
+      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(4, new ThreadFactory {
         override def newThread(r: Runnable): Thread = {
           val th = new Thread(r)
           th.setDaemon(true)
@@ -86,6 +85,16 @@ object BidiStreamBenchmarks {
       })),
       UncaughtExceptionReporter.LogExceptionsToStandardErr
     )
+
+  def scheduleResponse(): Future[Ack] = {
+    val promise = Promise[Ack]
+    globalScheduler.execute(new Runnable {
+      override def run(): Unit = {
+        promise.success(Continue)
+      }
+    })
+    promise.future
+  }
 }
 
 class BidiStreamBenchmarks {
@@ -104,6 +113,46 @@ class BidiStreamBenchmarks {
     Observable.range(0, iterations, 1).subscribe(bidi.in())
     bidi.out().onComplete()
     inObs.await(4.second)
+  }
+
+  @Benchmark
+  def BidiStreamAsynchResponse(): Unit = {
+    def proc(m: Any): ProcessingAction = {
+      if (m.asInstanceOf[Long] % 2 == 0) {
+        PushToInput(m)
+      } else {
+        PushToOutput(m)
+      }
+    }
+    val bidi = new BidiStream(proc, proc)
+    val inObs = new AwaitableObserver(m => scheduleResponse())
+    val outObs = new AwaitableObserver(m => scheduleResponse())
+    bidi.in().subscribe(inObs)
+    bidi.out().subscribe(outObs)
+    Observable.range(0, iterations, 1).subscribe(bidi.in())
+    Observable.range(0, iterations, 1).subscribe(bidi.out())
+    inObs.await(4.second)
+    outObs.await(4.second)
+  }
+
+  @Benchmark
+  def BidiStreamOneWayAsynchResponse(): Unit = {
+    def proc(m: Any): ProcessingAction = {
+      if (m.asInstanceOf[Long] % 2 == 0) {
+        PushToInput(m)
+      } else {
+        PushToOutput(m)
+      }
+    }
+    val bidi = new BidiStream(proc, proc)
+    val inObs = new AwaitableObserver(m => scheduleResponse())
+    val outObs = new AwaitableObserver()
+    bidi.in().subscribe(inObs)
+    bidi.out().subscribe(outObs)
+    Observable.range(0, iterations, 1).subscribe(bidi.in())
+    Observable.range(0, iterations, 1).subscribe(bidi.out())
+    inObs.await(4.second)
+    outObs.await(4.second)
   }
 
   @Benchmark
@@ -129,6 +178,17 @@ class BidiStreamBenchmarks {
 
   @Benchmark
   def MonifuMapTwoStreamsSynchronizedState(): Unit = {
+    val inObs = new AwaitableObserver(m => scheduleResponse())
+    val outObs = new AwaitableObserver(m => scheduleResponse())
+    val state = new SynchState
+    Observable.range(0, iterations, 1).map(state.updateState).subscribe(inObs)
+    Observable.range(0, iterations, 1).map(state.updateState).subscribe(outObs)
+    inObs.await(4.second)
+    outObs.await(4.second)
+  }
+
+  @Benchmark
+  def MonifuMapTwoStreamsSynchronizedStateAsynchResponse(): Unit = {
     val inObs = new AwaitableObserver()
     val outObs = new AwaitableObserver()
     val state = new SynchState
@@ -155,6 +215,44 @@ class BidiStreamBenchmarks {
     }
     inObs.await(4.second)
     outObs.await(4.second)
+  }
+
+  @Benchmark
+  def MonifuMergeAndGroupByAsynchResponse(): Unit = {
+    import MergeAndGroupByBidi._
+    val inObs = new AwaitableObserver(m => scheduleResponse())
+    val outObs = new AwaitableObserver(m => scheduleResponse())
+
+    val s1 = Observable.range(0, iterations, 1).map(v => FromS1(v))
+    val s2 = Observable.range(0, iterations, 1).map(v => FromS2(v))
+    val state = new RoutingState
+    Observable.merge(s1, s2).groupBy(state.routingFunc).subscribe {
+      s => s.key match {
+        case Input => s.map(v => v.value).subscribe(inObs); Continue
+        case Output => s.map(v => v.value).subscribe(outObs); Continue
+      }
+    }
+    inObs.await(10.second)
+    outObs.await(10.second)
+  }
+
+  @Benchmark
+  def MonifuMergeAndGroupByOneWayAsynchResponse(): Unit = {
+    import MergeAndGroupByBidi._
+    val inObs = new AwaitableObserver(m => scheduleResponse())
+    val outObs = new AwaitableObserver()
+
+    val s1 = Observable.range(0, iterations, 1).map(v => FromS1(v))
+    val s2 = Observable.range(0, iterations, 1).map(v => FromS2(v))
+    val state = new RoutingState
+    Observable.merge(s1, s2).groupBy(state.routingFunc).subscribe {
+      s => s.key match {
+        case Input => s.map(v => v.value).subscribe(inObs); Continue
+        case Output => s.map(v => v.value).subscribe(outObs); Continue
+      }
+    }
+    inObs.await(10.second)
+    outObs.await(10.second)
   }
 
   @Benchmark

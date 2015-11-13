@@ -8,7 +8,6 @@ import monifu.reactive.Ack.Continue
 import monifu.reactive.{Ack, Observable, Observer}
 import org.scalatest.{FunSuite, Matchers}
 import streams.BidiStream.{ProcessingAction, PushToInput, PushToOutput}
-import streams.benchmarks.MergeAndGroupByBidi
 
 import scala.collection.JavaConversions._
 import scala.concurrent.duration._
@@ -73,14 +72,11 @@ class BidiStreamTest extends FunSuite with Matchers {
   test("Messages from one source routed to one sink") {
     val inputMessages = new ConcurrentLinkedQueue[Long]()
     val outputMessages = new ConcurrentLinkedQueue[Long]()
-    val random = new Random()
     def procIn(m: Any): ProcessingAction = {
-      Thread.sleep(random.nextInt(10))
       PushToInput(m)
     }
 
     def procOut(m: Any): ProcessingAction = {
-      Thread.sleep(random.nextInt(10))
       PushToOutput(m)
     }
     val bidi = new BidiStream(procIn, procOut)
@@ -94,25 +90,24 @@ class BidiStreamTest extends FunSuite with Matchers {
     })
     bidi.in().subscribe(inObs)
     bidi.out().subscribe(outObs)
-    Observable.range(0, 100, 1).subscribe(bidi.in())
-    Observable.range(100, 200, 1).subscribe(bidi.out())
+    Observable.range(0, 1000, 1).subscribe(bidi.in())
+    Observable.range(1000, 2000, 1).subscribe(bidi.out())
     inObs.await(4.second)
     outObs.await(4.second)
-    inputMessages.size() should be(100)
-    outputMessages.size() should be(100)
+    inputMessages.size() should be(1000)
+    outputMessages.size() should be(1000)
     val inputMessagesArr = inputMessages.toArray
     val outputMessagesArr = outputMessages.toArray
 
-    for (i <- Range(0, 100)) {
+    for (i <- Range(0, 1000)) {
       assert(inputMessagesArr(i).asInstanceOf[Long] == i)
-      assert(outputMessagesArr(i).asInstanceOf[Long] == i + 100)
+      assert(outputMessagesArr(i).asInstanceOf[Long] == i + 1000)
     }
   }
 
   test("All incoming messages pushed to one sink") {
     val inputMessages = new util.HashSet[Long]()
     val outputMessages = new util.HashSet[Long]()
-    val random = new Random()
     def procIn(m: Any): ProcessingAction = {
       PushToInput(m)
     }
@@ -122,7 +117,6 @@ class BidiStreamTest extends FunSuite with Matchers {
     }
     val bidi = new BidiStream(procIn, procOut)
     val inObs = new AwaitableObserver(m => {
-      Thread.sleep(random.nextInt(5))
       inputMessages.add(m.asInstanceOf[Long])
       Continue
     })
@@ -132,11 +126,11 @@ class BidiStreamTest extends FunSuite with Matchers {
     })
     bidi.in().subscribe(inObs)
     bidi.out().subscribe(outObs)
-    Observable.range(0, 100, 1).subscribe(bidi.in())
-    Observable.range(100, 200, 1).subscribe(bidi.out())
+    Observable.range(0, 1000, 1).subscribe(bidi.in())
+    Observable.range(1000, 2000, 1).subscribe(bidi.out())
     inObs.await(4.second)
     outObs.await(4.second)
-    inputMessages.toSet.size should be(200)
+    inputMessages.toSet.size should be(2000)
     outputMessages.size() should be(0)
   }
 
@@ -161,26 +155,51 @@ class BidiStreamTest extends FunSuite with Matchers {
     assert(inputMessages.size() == 100)
   }
 
-  test("monifu bidi by merge and group by") {
-    import MergeAndGroupByBidi._
-    val inObs = new AwaitableObserver(v => {
-      println(v)
-      Continue
-    })
-    val outObs = new AwaitableObserver(v => {
-      println(v)
-      Continue
-    })
-    val s1 = Observable.range(0, 100, 1).map(v => FromS1(v))
-    val s2 = Observable.range(0, 100, 1).map(v => FromS2(v))
-    val state = new RoutingState
-    Observable.merge(s1, s2).groupBy(state.routingFunc).subscribe {
-      s => s.key match {
-        case Input => s.map(v => v.value).subscribe(inObs); Continue
-        case Output => s.map(v => v.value).subscribe(outObs); Continue
-      }
+  test("Should work with asynch responses") {
+    val inputMessages = new ConcurrentLinkedQueue[Long]()
+    val outputMessages = new ConcurrentLinkedQueue[Long]()
+    val random = new Random()
+    def procIn(m: Any): ProcessingAction = {
+      PushToInput(m)
     }
+
+    def procOut(m: Any): ProcessingAction = {
+      PushToOutput(m)
+    }
+    def scheduleResponse(): Future[Ack] = {
+      val promise = Promise[Ack]
+      globalScheduler.execute(new Runnable {
+        override def run(): Unit = {
+          Thread.sleep(random.nextInt(4))
+          promise.success(Continue)
+        }
+      })
+      promise.future
+    }
+    val bidi = new BidiStream(procIn, procOut)
+    val inObs = new AwaitableObserver(m => {
+      inputMessages.add(m.asInstanceOf[Long])
+      scheduleResponse()
+    })
+    val outObs = new AwaitableObserver(m => {
+      outputMessages.add(m.asInstanceOf[Long])
+      scheduleResponse()
+    })
+    bidi.in().subscribe(inObs)
+    bidi.out().subscribe(outObs)
+    Observable.range(0, 100, 1).subscribe(bidi.in())
+    Observable.range(100, 200, 1).subscribe(bidi.out())
     inObs.await(4.second)
     outObs.await(4.second)
+    inputMessages.size() should be(100)
+    outputMessages.size() should be(100)
+    val inputMessagesArr = inputMessages.toArray
+    val outputMessagesArr = outputMessages.toArray
+
+    for (i <- Range(0, 100)) {
+      assert(inputMessagesArr(i).asInstanceOf[Long] == i)
+      assert(outputMessagesArr(i).asInstanceOf[Long] == i + 100)
+    }
   }
+
 }
