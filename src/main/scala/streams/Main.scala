@@ -5,11 +5,11 @@ import java.util.concurrent.{Executors, ThreadFactory}
 import monifu.concurrent.schedulers.AsyncScheduler
 import monifu.concurrent.{Scheduler, UncaughtExceptionReporter}
 import monifu.reactive.Ack.Continue
-import monifu.reactive.Observable
+import monifu.reactive.{Ack, Observable}
 import streams.BidiStream.{ProcessingAction, PushToInput, PushToOutput}
-import streams.benchmarks.{AwaitableObserver, MergeAndGroupByBidi, SimpleState}
+import streams.benchmarks.{SynchState, AwaitableObserver, MergeAndGroupByBidi, SimpleState}
 
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{Promise, Future, ExecutionContext}
 import scala.concurrent.duration._
 
 /**
@@ -40,8 +40,18 @@ object Main {
 
   val iterations = 10000000000l
 
+  def scheduleResponse(): Future[Ack] = {
+    val promise = Promise[Ack]
+    globalScheduler.execute(new Runnable {
+      override def run(): Unit = {
+        promise.success(Continue)
+      }
+    })
+    promise.future
+  }
+
   def main(args: Array[String]) {
-    bidiTest()
+    monifuMappingTest()
   }
 
   def bidiTest(): Unit = {
@@ -53,7 +63,7 @@ object Main {
       PushToOutput(state.updateState(1))
     }
     val bidi = new BidiStream(procIn, procOut)
-    val inObs = new AwaitableObserver()
+    val inObs = new AwaitableObserver(m => scheduleResponse())
     val outObs = new AwaitableObserver()
     bidi.in().subscribe(inObs)
     //    bidi.out().subscribe(outObs)
@@ -61,7 +71,7 @@ object Main {
     Observable.range(0, iterations, 1).subscribe(bidi.in())
     //    Observable.range(0, iterations, 1).subscribe(bidi.out())
     inObs.await(1000.second)
-    outObs.await(1000.second)
+    //    outObs.await(1000.second)
   }
 
   def monifuTest(): Unit = {
@@ -80,5 +90,12 @@ object Main {
     }
     inObs.await(1000.second)
     outObs.await(1000.second)
+  }
+
+  def monifuMappingTest(): Unit = {
+    val inObs = new AwaitableObserver(m => scheduleResponse())
+    val state = new SynchState
+    Observable.range(0, iterations, 1).map(state.updateState).subscribe(inObs)
+    inObs.await(1000.second)
   }
 }

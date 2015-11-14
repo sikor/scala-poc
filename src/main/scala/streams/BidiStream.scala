@@ -10,10 +10,10 @@ import monifu.reactive.{Ack, Subject, Subscriber}
 import streams.BidiStream._
 
 import scala.annotation.tailrec
+import scala.collection.JavaConversions._
 import scala.concurrent.{Future, Promise}
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
-import scala.collection.JavaConversions._
 
 /**
   * Created by Paweł Sikora.
@@ -239,7 +239,7 @@ class BidiStream[IC, IP, OC, OP](onInputMessage: IC => ProcessingAction[IP, OP],
     } else {
       ChangeStateAndEffect(s => subjectLens.setSubscriberState(s, WaitingForAck), () => {
         val producerPromise: Promise[Ack] = Promise()
-        subAck.onComplete(ack => producerPromise.completeWith(onSubscriberAck(stateRef.get(), sub, subjectLens, ack)))(sub.scheduler)
+        subAck.onComplete(ack => producerPromise.completeWith(onSubscriberAck(stateRef.get(), sub, subjectLens, ack)))(SameThreadExecutionContext)
         producerPromise.future
       })
 
@@ -412,6 +412,7 @@ class BidiStream[IC, IP, OC, OP](onInputMessage: IC => ProcessingAction[IP, OP],
   sealed trait SubjectLens[C, P] {
     type SubscriberStateT = SubscriberState[P]
     type SubscriberT = Subscriber[P]
+
     def setSubscriberState(state: State, subscriberState: SubscriberStateT): State
 
     def getSubscriberState(state: State): SubscriberStateT
@@ -484,4 +485,6 @@ class BidiStream[IC, IP, OC, OP](onInputMessage: IC => ProcessingAction[IP, OP],
     * Means that algorithm which constructed this effect should be repeated if expected state does not match
     */
   case class NewStateAndEffect(newState: State, effect: () => Future[Ack]) extends AtomicUpdate
+
+
 }
