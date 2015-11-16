@@ -44,7 +44,7 @@ class QueueServer {
                     processingExecutor.execute(new Runnable() {
                         @Override
                         public void run() {
-                            addresses.offer(addr);
+                            addresses.add(addr);
                         }
                     });
                 }
@@ -81,8 +81,8 @@ class QueueServer {
                 e.printStackTrace();
             }
         };
-        Thread senderThread = new Thread(receiver);
-        Thread receiverThread = new Thread(sender);
+        Thread senderThread = new Thread(sender);
+        Thread receiverThread = new Thread(receiver);
         senderThread.start();
         receiverThread.start();
 
