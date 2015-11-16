@@ -1,12 +1,12 @@
 package streams.benchmarks
 
-import java.util.concurrent.{Executors, ThreadFactory}
+import java.util.concurrent.{TimeUnit, Executors, ThreadFactory}
 
 import monifu.concurrent.schedulers.AsyncScheduler
 import monifu.concurrent.{Scheduler, UncaughtExceptionReporter}
 import monifu.reactive.Ack.Continue
 import monifu.reactive.{Ack, Observable}
-import org.openjdk.jmh.annotations.{OperationsPerInvocation, Benchmark}
+import org.openjdk.jmh.annotations._
 import streams.BidiStream
 import streams.BidiStream.{NoAction, ProcessingAction, PushToInput, PushToOutput}
 
@@ -65,6 +65,9 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
   */
 object BidiStreamBenchmarks {
   val iterations = 1000
+
+  val defaultExecutor = ExecutionContext.global
+
   implicit val globalScheduler: Scheduler =
     AsyncScheduler(
       Executors.newSingleThreadScheduledExecutor(new ThreadFactory {
@@ -75,7 +78,7 @@ object BidiStreamBenchmarks {
           th
         }
       }),
-      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(10, new ThreadFactory {
+      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1, new ThreadFactory {
         override def newThread(r: Runnable): Thread = {
           val th = new Thread(r)
           th.setDaemon(true)
@@ -88,7 +91,7 @@ object BidiStreamBenchmarks {
 
   def scheduleResponse(): Future[Ack] = {
     val promise = Promise[Ack]
-    globalScheduler.execute(new Runnable {
+    defaultExecutor.execute(new Runnable {
       override def run(): Unit = {
         promise.success(Continue)
       }
@@ -97,11 +100,14 @@ object BidiStreamBenchmarks {
   }
 }
 
+
 class BidiStreamBenchmarks {
 
   import BidiStreamBenchmarks._
 
 
+  @BenchmarkMode(Array(Mode.AverageTime, Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.MICROSECONDS)
   @OperationsPerInvocation(1000)
   @Benchmark
   def BidiStreamOneDirection(): Unit = {

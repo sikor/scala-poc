@@ -45,9 +45,7 @@ class UdpBenchmark {
   def setupBench(): Unit = {
     socket = new DatagramSocket(9876)
     socket.setSendBufferSize(65000 * 5)
-    val sendData: Array[Byte] = ("Use of the force() method described in the previous section requires having " +
-      "a direct dependency. However, it may be desirable to force a revision without introducing " +
-      "that direct dependency").getBytes()
+    val sendData: Array[Byte] = "Use".getBytes()
     sendPacket = new DatagramPacket(sendData, sendData.length, ipAddress, port)
     sendLocalHost = new DatagramPacket(sendData, sendData.length, localhost, port)
     targetAddress = new InetSocketAddress(ipAddress, port)
@@ -99,4 +97,5 @@ class UdpBenchmark {
     }
     nioByteBuffer.rewind()
   }
+
 }

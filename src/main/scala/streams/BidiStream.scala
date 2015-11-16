@@ -239,7 +239,7 @@ class BidiStream[IC, IP, OC, OP](onInputMessage: IC => ProcessingAction[IP, OP],
     } else {
       ChangeStateAndEffect(s => subjectLens.setSubscriberState(s, WaitingForAck), () => {
         val producerPromise: Promise[Ack] = Promise()
-        subAck.onComplete(ack => producerPromise.completeWith(onSubscriberAck(stateRef.get(), sub, subjectLens, ack)))(SameThreadExecutionContext)
+        subAck.onComplete(ack => producerPromise.completeWith(onSubscriberAck(stateRef.get(), sub, subjectLens, ack)))(sub.scheduler)
         producerPromise.future
       })
 
