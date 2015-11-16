@@ -53,11 +53,10 @@ class MultiThreadedServer {
                 }
             }
         };
-        new Thread(runnable).start();
+        Thread t1 = new Thread(runnable);
         Thread t2 = new Thread(runnable);
+        t1.start();
         t2.start();
         t2.join();
-
-
     }
 }

@@ -19,7 +19,7 @@ class QueueServer {
         serverSocket.setReceiveBufferSize(66000 * 100);
         System.out.println("receive buff size: " + serverSocket.getReceiveBufferSize());
         System.out.println("send buff size: " + serverSocket.getSendBufferSize());
-        LinkedBlockingQueue<InetSocketAddress> addresses = new LinkedBlockingQueue<>();
+        LinkedBlockingQueue<InetSocketAddress> addresses = new LinkedBlockingQueue<>(10000);
         Runnable receiver = () -> {
             byte[] receiveData = new byte[1024];
             DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);

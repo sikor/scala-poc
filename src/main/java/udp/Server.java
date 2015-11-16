@@ -19,11 +19,11 @@ class Server {
         long testStartPeriod = System.currentTimeMillis();
         long curTime = 0;
         long handledRequests = 0;
+        long allReceived = 0;
         serverSocket.setSendBufferSize(66000 * 100);
         serverSocket.setReceiveBufferSize(66000 * 100);
         System.out.println("receive buff size: " + serverSocket.getReceiveBufferSize());
         System.out.println("send buff size: " + serverSocket.getSendBufferSize());
-        long allReceived = 0;
         while (true) {
             serverSocket.receive(receivePacket);
             InetAddress IPAddress = receivePacket.getAddress();
