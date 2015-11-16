@@ -9,10 +9,11 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 class QueueServer {
+
+
     public static void main(String args[]) throws Exception {
         InetSocketAddress bindAddr;
         if (args.length == 2) {
@@ -25,14 +26,27 @@ class QueueServer {
         serverSocket.setReceiveBufferSize(66000 * 100);
         System.out.println("receive buff size: " + serverSocket.getReceiveBufferSize());
         System.out.println("send buff size: " + serverSocket.getSendBufferSize());
-        LinkedBlockingQueue<InetSocketAddress> addresses = new LinkedBlockingQueue<>(10000);
+        final LinkedBlockingQueue<InetSocketAddress> addresses = new LinkedBlockingQueue<>(10000);
+
+        Executor processingExecutor = Executors.newFixedThreadPool(1, r -> {
+            Thread th = new Thread(r);
+            th.setDaemon(true);
+            th.setName("queueServer-executor");
+            return th;
+        });
         Runnable receiver = () -> {
             byte[] receiveData = new byte[1024];
             DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
             try {
                 while (true) {
                     serverSocket.receive(receivePacket);
-                    addresses.offer(new InetSocketAddress(receivePacket.getAddress(), receivePacket.getPort()));
+                    final InetSocketAddress addr = new InetSocketAddress(receivePacket.getAddress(), receivePacket.getPort());
+                    processingExecutor.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            addresses.offer(addr);
+                        }
+                    });
                 }
             } catch (IOException e) {
                 e.printStackTrace();
@@ -73,7 +87,5 @@ class QueueServer {
         receiverThread.start();
 
         receiverThread.join();
-
-
     }
 }
