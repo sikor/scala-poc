@@ -48,7 +48,9 @@ public class NioServer {
         long curTime = 0;
         long handledRequests = 0;
         long allReceived = 0;
+        Statistics statistics = new Statistics(testStartPeriod, handledRequests, allReceived).invoke();
         while (true) {
+//            System.out.println("waiting");
             selector.select();
             SelectionKey key = selector.selectedKeys().iterator().next();
             if (key.isWritable()) {
@@ -61,16 +63,8 @@ public class NioServer {
 //                        System.out.println("Waiting for write or read");
                         break;
                     } else {
-
                         addresses.poll();
-                        ++handledRequests;
-                        ++allReceived;
-                        curTime = System.currentTimeMillis();
-                        if (curTime - testStartPeriod >= 1000) {
-                            System.out.println(String.valueOf(curTime - testStartPeriod) + " " + handledRequests + " all received: " + allReceived);
-                            handledRequests = 0;
-                            testStartPeriod = curTime;
-                        }
+                        statistics.invoke();
                     }
                 }
 //                System.out.printf("Waiting for read");
@@ -83,6 +77,7 @@ public class NioServer {
                         int sentBytes = channel.send(sendBuffer, receiveAddress);
                         sendBuffer.rewind();
                         if (sentBytes == 0) {
+                            System.out.print(" output full ");
                             addresses.offer(receiveAddress);
                             if (addresses.size() == queueCapacity) {
                                 System.out.println("queue full");
@@ -91,20 +86,65 @@ public class NioServer {
                                 break;
                             }
                         } else {
-                            ++handledRequests;
-                            ++allReceived;
-                            curTime = System.currentTimeMillis();
-                            if (curTime - testStartPeriod >= 1000) {
-                                System.out.println(String.valueOf(curTime - testStartPeriod) + " " + handledRequests + " all received: " + allReceived);
-                                handledRequests = 0;
-                                testStartPeriod = curTime;
+                            statistics.invoke();
+                            SocketAddress address;
+                            while ((address = addresses.peek()) != null) {
+                                int sentBytes2 = channel.send(sendBuffer, address);
+                                sendBuffer.rewind();
+                                if (sentBytes2 == 0) {
+                                    break;
+                                } else {
+                                    addresses.poll();
+                                    statistics.invoke();
+                                }
                             }
                         }
                     } else {
+                        //not enough to read
+                        if (!addresses.isEmpty()) {
+                            key.interestOps(SelectionKey.OP_READ | SelectionKey.OP_WRITE);
+                        }
                         break;
                     }
                 }
             }
+        }
+    }
+
+    private static class Statistics {
+        private long testStartPeriod;
+        private long handledRequests;
+        private long allReceived;
+
+        public Statistics(long testStartPeriod, long handledRequests, long allReceived) {
+            this.testStartPeriod = testStartPeriod;
+            this.handledRequests = handledRequests;
+            this.allReceived = allReceived;
+        }
+
+        public long getTestStartPeriod() {
+            return testStartPeriod;
+        }
+
+        public long getHandledRequests() {
+            return handledRequests;
+        }
+
+        public long getAllReceived() {
+            return allReceived;
+        }
+
+        public Statistics invoke() {
+            long curTime;
+            ++handledRequests;
+            ++allReceived;
+            curTime = System.currentTimeMillis();
+            if (curTime - testStartPeriod >= 1000) {
+                System.out.println(String.valueOf(curTime - testStartPeriod) + " " + handledRequests + " all received: " + allReceived);
+                handledRequests = 0;
+                testStartPeriod = curTime;
+            }
+            return this;
         }
     }
 }
