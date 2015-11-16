@@ -14,7 +14,13 @@ import java.util.concurrent.TimeUnit;
 
 class QueueServer {
     public static void main(String args[]) throws Exception {
-        DatagramSocket serverSocket = new DatagramSocket(9876);
+        InetSocketAddress bindAddr;
+        if (args.length == 2) {
+            bindAddr = new InetSocketAddress(args[0], Integer.valueOf(args[1]));
+        } else {
+            bindAddr = new InetSocketAddress(9876);
+        }
+        DatagramSocket serverSocket = new DatagramSocket(bindAddr);
         serverSocket.setSendBufferSize(66000 * 100);
         serverSocket.setReceiveBufferSize(66000 * 100);
         System.out.println("receive buff size: " + serverSocket.getReceiveBufferSize());

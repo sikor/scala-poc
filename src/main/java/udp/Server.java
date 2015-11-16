@@ -9,7 +9,13 @@ import java.net.*;
 
 class Server {
     public static void main(String args[]) throws Exception {
-        DatagramSocket serverSocket = new DatagramSocket(9876);
+        InetSocketAddress bindAddr;
+        if (args.length == 2) {
+            bindAddr = new InetSocketAddress(args[0], Integer.valueOf(args[1]));
+        } else {
+            bindAddr = new InetSocketAddress(9876);
+        }
+        DatagramSocket serverSocket = new DatagramSocket(bindAddr);
         byte[] receiveData = new byte[1024];
         byte[] sendData = new byte[1024];
         DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);

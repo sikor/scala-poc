@@ -9,15 +9,19 @@ import java.net.*;
 
 class Client {
     public static void main(String args[]) throws Exception {
-        BufferedReader inFromUser = new BufferedReader(new InputStreamReader(System.in));
+        InetSocketAddress targetAddr;
+        if (args.length == 2) {
+            targetAddr = new InetSocketAddress(args[0], Integer.valueOf(args[1]));
+        } else {
+            targetAddr = new InetSocketAddress(9876);
+        }
         DatagramSocket clientSocket = new DatagramSocket();
-        InetAddress IPAddress = InetAddress.getByName("localhost");
         byte[] sendData = new byte[1024];
         byte[] receiveData = new byte[1024];
         int counter = 0;
         String sentence = "dupa";
         sendData = sentence.getBytes();
-        DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, IPAddress, 9876);
+        DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, targetAddr.getAddress(), targetAddr.getPort());
         DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
         long start = System.currentTimeMillis();
         float time = 100;

@@ -16,8 +16,14 @@ public class NioServer {
 
 
     public static void main(String[] args) throws Exception {
+        InetSocketAddress bindAddr;
+        if (args.length == 2) {
+            bindAddr = new InetSocketAddress(args[0], Integer.valueOf(args[1]));
+        } else {
+            bindAddr = new InetSocketAddress(9876);
+        }
         DatagramChannel channel = DatagramChannel.open();
-        channel.bind(new InetSocketAddress(9876));
+        channel.bind(bindAddr);
         channel.configureBlocking(false);
         DatagramSocket serverSocket = channel.socket();
         serverSocket.setSendBufferSize(66000 * 100);
