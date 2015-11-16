@@ -9,6 +9,9 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 
+/**
+ * 380k - 500k req p second
+ */
 class Server {
     public static void main(String args[]) throws Exception {
         InetSocketAddress bindAddr;

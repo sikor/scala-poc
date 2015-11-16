@@ -6,6 +6,7 @@ lazy val Client = config("Client").extend(Compile).describedAs("Client")
 lazy val QueueServer = config("QueueServer").extend(Compile).describedAs("QueueServer")
 lazy val NioServer = config("NioServer").extend(Compile).describedAs("NioServer")
 lazy val NioQueueServer = config("NioQueueServer").extend(Compile).describedAs("NioQueueServer")
+lazy val QueueServerWithProcessing = config("QueueServerWithProcessing").extend(Compile).describedAs("QueueServerWithProcessing")
 
 
 val buildJars = taskKey[Unit]("build all jars")
@@ -44,6 +45,9 @@ lazy val core = (project in file("core")).settings(
   assemblyJarName in(NioQueueServer, assembly) := "NioQueueServer.jar",
   mainClass in(NioQueueServer, assembly) := Some("udp.NioQueueServer"),
 
+  inConfig(QueueServerWithProcessing)(AssemblyPlugin.projectSettings),
+  assemblyJarName in(QueueServerWithProcessing, assembly) := "QueueServerWithProcessing.jar",
+  mainClass in(QueueServerWithProcessing, assembly) := Some("udp.QueueServerWithProcessing"),
 
   buildJars := {
     (assembly in Server).value
@@ -51,6 +55,7 @@ lazy val core = (project in file("core")).settings(
     (assembly in QueueServer).value
     (assembly in NioServer).value
     (assembly in NioQueueServer).value
+    (assembly in QueueServerWithProcessing).value
   }
 ).disablePlugins(JmhPlugin).disablePlugins(AssemblyPlugin)
 

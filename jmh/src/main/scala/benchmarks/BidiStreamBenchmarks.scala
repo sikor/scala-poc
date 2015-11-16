@@ -1,14 +1,13 @@
 package benchmarks
 
-import java.util.concurrent.{Executors, ThreadFactory, TimeUnit}
+import java.util.concurrent.{Executors, ThreadFactory}
 
 import monifu.concurrent.schedulers.AsyncScheduler
 import monifu.concurrent.{Scheduler, UncaughtExceptionReporter}
 import monifu.reactive.Ack.Continue
 import monifu.reactive.{Ack, Observable}
 import org.openjdk.jmh.annotations._
-import streams.BidiStream.ProcessingAction
-import streams.BidiStream._
+import streams.BidiStream.{ProcessingAction, _}
 import streams.MergeAndGroupByBidi._
 import streams._
 
@@ -64,6 +63,22 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
   * [info] BidiStreamBenchmarks.MonifuMergeAndGroupBy                 thrpt    5   9.881 ± 0.375  ops/s
   * [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneDirection     thrpt    5  37.383 ± 0.740  ops/s
   *
+  *
+  *
+  [info] BidiStreamBenchmarks.BidiStreamBothDirections                            thrpt    5  11932104.341 ± 9139022.353   ops/s
+  [info] BidiStreamBenchmarks.BidiStreamOneDirection                              thrpt    5        13.862 ±       1.008  ops/us
+  [info] BidiStreamBenchmarks.BidiStreamOneDirectionAsynch                        thrpt    5    226372.851 ±  138621.755   ops/s
+  [info] BidiStreamBenchmarks.BidiStreamOneWayAsynchResponse                      thrpt    5    760437.521 ±  768847.721   ops/s
+  [info] BidiStreamBenchmarks.BidiStreamTwoDirectionsAsynch                       thrpt    5    591294.108 ±   54759.079   ops/s
+  [info] BidiStreamBenchmarks.MonifuMapOneStreamAsynchResponse                    thrpt    5    202007.068 ±   86766.684   ops/s
+  [info] BidiStreamBenchmarks.MonifuMapTwoStreamsSynchronizedState                thrpt    5  45148292.187 ± 1059533.846   ops/s
+  [info] BidiStreamBenchmarks.MonifuMapTwoStreamsSynchronizedStateAsynchResponse  thrpt    5   1078806.535 ±  112998.007   ops/s
+  [info] BidiStreamBenchmarks.MonifuMergeAndGroupBy                               thrpt    5   6831643.368 ±  116658.773   ops/s
+  [info] BidiStreamBenchmarks.MonifuMergeAndGroupByAsynchResponse                 thrpt    5    285417.063 ±   65240.866   ops/s
+  [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneDirection                   thrpt    5   8559017.525 ±  693256.272   ops/s
+  [info] BidiStreamBenchmarks.MonifuMergeAndGroupByOneWayAsynchResponse           thrpt    5    398916.358 ±  152453.973   ops/s
+  [info] BidiStreamBenchmarks.BidiStreamOneDirection                               avgt    5         0.073 ±       0.002   us/op
+  *
   */
 object BidiStreamBenchmarks {
   val iterations = 1000
@@ -108,8 +123,6 @@ class BidiStreamBenchmarks {
   import BidiStreamBenchmarks._
 
 
-  @BenchmarkMode(Array(Mode.AverageTime, Mode.Throughput))
-  @OutputTimeUnit(TimeUnit.MICROSECONDS)
   @OperationsPerInvocation(1000)
   @Benchmark
   def BidiStreamOneDirection(): Unit = {

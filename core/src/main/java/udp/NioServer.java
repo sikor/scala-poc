@@ -11,6 +11,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  * @author Paweł Sikora
+ *
+ * 340k - 4010k req p second
  */
 public class NioServer {
 

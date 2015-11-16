@@ -16,6 +16,9 @@ import java.nio.channels.Selector;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * 390000 req p second with remote clients.
+ */
 class NioQueueServer {
 
 
