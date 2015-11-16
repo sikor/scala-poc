@@ -1,8 +1,8 @@
-package udp.benchmarks
+package benchmarks
 
 import java.net.{DatagramPacket, DatagramSocket, InetAddress, InetSocketAddress}
 import java.nio.ByteBuffer
-import java.nio.channels.{SelectionKey, Selector, DatagramChannel}
+import java.nio.channels.{DatagramChannel, SelectionKey, Selector}
 
 import org.openjdk.jmh.annotations._
 

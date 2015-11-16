@@ -1,10 +1,10 @@
-package streams.benchmarks
+package streams
 
-import monifu.reactive.{Observer, Ack}
 import monifu.reactive.Ack.Continue
+import monifu.reactive.{Ack, Observer}
 
 import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.{Await, Promise, Future}
+import scala.concurrent.{Await, Future, Promise}
 
 /**
   * Created by Paweł Sikora.

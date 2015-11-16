@@ -1,14 +1,16 @@
-package streams.benchmarks
+package benchmarks
 
-import java.util.concurrent.{TimeUnit, Executors, ThreadFactory}
+import java.util.concurrent.{Executors, ThreadFactory, TimeUnit}
 
 import monifu.concurrent.schedulers.AsyncScheduler
 import monifu.concurrent.{Scheduler, UncaughtExceptionReporter}
 import monifu.reactive.Ack.Continue
 import monifu.reactive.{Ack, Observable}
 import org.openjdk.jmh.annotations._
-import streams.BidiStream
-import streams.BidiStream.{NoAction, ProcessingAction, PushToInput, PushToOutput}
+import streams.BidiStream.ProcessingAction
+import streams.BidiStream._
+import streams.MergeAndGroupByBidi._
+import streams._
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future, Promise}
@@ -235,7 +237,6 @@ class BidiStreamBenchmarks {
   @Benchmark
   @OperationsPerInvocation(2000)
   def MonifuMergeAndGroupBy(): Unit = {
-    import MergeAndGroupByBidi._
     val inObs = new AwaitableObserver()
     val outObs = new AwaitableObserver()
 
@@ -255,7 +256,6 @@ class BidiStreamBenchmarks {
   @Benchmark
   @OperationsPerInvocation(2000)
   def MonifuMergeAndGroupByAsynchResponse(): Unit = {
-    import MergeAndGroupByBidi._
     val inObs = new AwaitableObserver(m => scheduleResponse())
     val outObs = new AwaitableObserver(m => scheduleResponse())
 
@@ -275,7 +275,6 @@ class BidiStreamBenchmarks {
   @Benchmark
   @OperationsPerInvocation(2000)
   def MonifuMergeAndGroupByOneWayAsynchResponse(): Unit = {
-    import MergeAndGroupByBidi._
     val inObs = new AwaitableObserver(m => scheduleResponse())
     val outObs = new AwaitableObserver()
 
@@ -295,7 +294,6 @@ class BidiStreamBenchmarks {
   @Benchmark
   @OperationsPerInvocation(1000)
   def MonifuMergeAndGroupByOneDirection(): Unit = {
-    import MergeAndGroupByBidi._
     val inObs = new AwaitableObserver()
     val outObs = new AwaitableObserver()
 

@@ -1,17 +1,14 @@
-package streams.benchmarks
+package streams
 
 /**
   * Created by Paweł Sikora.
   */
-class SynchState {
+class SimpleState {
 
   var value = 0l
 
   def updateState(msg: Long): Long = {
-    this.synchronized {
-      value += msg
-    }
+    value += msg
     msg
   }
-
 }

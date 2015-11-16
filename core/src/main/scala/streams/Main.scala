@@ -7,10 +7,9 @@ import monifu.concurrent.{Scheduler, UncaughtExceptionReporter}
 import monifu.reactive.Ack.Continue
 import monifu.reactive.{Ack, Observable}
 import streams.BidiStream.{ProcessingAction, PushToInput, PushToOutput}
-import streams.benchmarks.{SynchState, AwaitableObserver, MergeAndGroupByBidi, SimpleState}
 
-import scala.concurrent.{Promise, Future, ExecutionContext}
 import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future, Promise}
 
 /**
   * Created by Paweł Sikora.

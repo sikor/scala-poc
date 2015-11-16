@@ -1,4 +1,4 @@
-package streams.benchmarks
+package benchmarks
 
 import java.util
 import java.util.concurrent.ConcurrentHashMap

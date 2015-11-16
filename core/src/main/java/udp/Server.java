@@ -4,8 +4,10 @@ package udp;
  * Created by Paweł Sikora.
  */
 
-import java.io.*;
-import java.net.*;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 
 class Server {
     public static void main(String args[]) throws Exception {

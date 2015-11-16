@@ -18,7 +18,7 @@ import scala.util.{Failure, Success, Try}
 /**
   * Created by Paweł Sikora.
   */
-private[streams] object BidiStream {
+object BidiStream {
 
   /**
     * Api for processing functions (onInputMessage and onOutputMessage). They takes incoming messages from one of two
