@@ -1,0 +1,171 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+
+<html>
+<head>
+
+    <meta http-equiv="content-type" content="text/html; charset=utf-8"/>
+    <title></title>
+    <meta name="generator" content="LibreOffice 4.4.2.2 (Linux)"/>
+    <meta name="created" content="2015-11-17T15:26:35.357134861"/>
+    <meta name="changed" content="2015-11-17T16:49:47.666009657"/>
+
+    <style type="text/css">
+        body,div,table,thead,tbody,tfoot,tr,th,td,p { font-family:"Liberation Sans"; font-size:x-small }
+    </style>
+
+</head>
+
+<body>
+<table cellspacing="0" border="0">
+    <colgroup width="308"></colgroup>
+    <colgroup width="88"></colgroup>
+    <colgroup width="95"></colgroup>
+    <colgroup width="536"></colgroup>
+    <tr>
+        <td height="17" align="left"><br></td>
+        <td align="left">localhost</td>
+        <td align="left">remote clients</td>
+        <td align="left">[*1000 request – response per second, maximally]</td>
+    </tr>
+    <tr>
+        <td height="17" align="left">blocking with one reader and one writer thread</td>
+        <td align="right" sdval="380" sdnum="1033;">380</td>
+        <td align="right" sdval="550" sdnum="1033;">550</td>
+        <td align="left">californium library uses this approach and announce almost 400k coap req per second</td>
+    </tr>
+    <tr>
+        <td height="17" align="left">blocking one thread</td>
+        <td align="right" sdval="340" sdnum="1033;">340</td>
+        <td align="right" sdval="510" sdnum="1033;">510</td>
+        <td align="left">it has about 380k at the beginning and later 510k.</td>
+    </tr>
+    <tr>
+        <td height="17" align="left">blocking two threads</td>
+        <td align="right" sdval="380" sdnum="1033;">380</td>
+        <td align="right" sdval="440" sdnum="1033;">440</td>
+        <td align="left">lock congestion</td>
+    </tr>
+    <tr>
+        <td height="17" align="left">nio one thread with spinning</td>
+        <td align="right" sdval="270" sdnum="1033;">270</td>
+        <td align="right" sdval="430" sdnum="1033;">430</td>
+        <td align="left">(340 – 430)</td>
+    </tr>
+    <tr>
+        <td height="17" align="left">nio one reader and one writer thread with spinning</td>
+        <td align="right" sdval="350" sdnum="1033;">350</td>
+        <td align="right" sdval="405" sdnum="1033;">405</td>
+        <td align="left"><br></td>
+    </tr>
+    <tr>
+        <td height="17" align="left">nio one reader and one writer thread</td>
+        <td align="right" sdval="320" sdnum="1033;">320</td>
+        <td align="right" sdval="390" sdnum="1033;">390</td>
+        <td align="left"><br></td>
+    </tr>
+    <tr>
+        <td height="17" align="left">nio one thread</td>
+        <td align="right" sdval="270" sdnum="1033;">270</td>
+        <td align="right" sdval="380" sdnum="1033;">380</td>
+        <td align="left">big variations (300 – 380)</td>
+    </tr>
+    <tr>
+        <td height="17" align="left">netty</td>
+        <td align="right" sdval="170" sdnum="1033;">170</td>
+        <td align="right" sdval="250" sdnum="1033;">250</td>
+        <td align="left"><br></td>
+    </tr>
+    <tr>
+        <td height="17" align="left">akka</td>
+        <td align="right" sdval="155" sdnum="1033;">155</td>
+        <td align="right" sdval="190" sdnum="1033;">190</td>
+        <td align="left"><br></td>
+    </tr>
+    <tr>
+        <td height="17" align="left"><br></td>
+        <td align="left"><br></td>
+        <td align="left"><br></td>
+        <td align="left"><br></td>
+    </tr>
+    <tr>
+        <td height="17" align="left"><br></td>
+        <td align="left"><br></td>
+        <td align="left"><br></td>
+        <td align="left"><br></td>
+    </tr>
+    <tr>
+        <td height="17" align="left"><br></td>
+        <td align="left"><br></td>
+        <td align="left"><br></td>
+        <td align="left"><br></td>
+    </tr>
+    <tr>
+        <td colspan=4 rowspan=31 height="529" align="left"><br><img src="udpServersComparison_html_8f6433aa.png"
+                                                                    width=764 height=504 hspace=133 vspace=27>
+        </td>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+    <tr>
+    </tr>
+</table>
+<!-- ************************************************************************** -->
+</body>
+
+</html>
