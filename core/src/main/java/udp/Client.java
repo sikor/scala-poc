@@ -1,8 +1,5 @@
 package udp;
 
-/**
- * Created by Paweł Sikora.
- */
 
 import java.io.*;
 import java.net.*;

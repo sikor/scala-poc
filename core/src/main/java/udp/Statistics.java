@@ -11,18 +11,6 @@ public class Statistics {
     private AtomicInteger allReceived = new AtomicInteger(0);
 
 
-    public long getTestStartPeriod() {
-        return testStartPeriod;
-    }
-
-    public long getHandledRequests() {
-        return handledRequests.get();
-    }
-
-    public long getAllReceived() {
-        return allReceived.get();
-    }
-
     public Statistics onSent() {
         long curTime;
         handledRequests.incrementAndGet();

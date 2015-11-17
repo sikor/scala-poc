@@ -1,7 +1,7 @@
 package udp;
 
 /**
- * Created by Paweł Sikora.
+ * .
  */
 
 import java.io.BufferedReader;

@@ -1,7 +1,7 @@
 package udp;
 
 /**
- * Created by Paweł Sikora.
+ * .
  */
 
 import java.net.DatagramPacket;
@@ -10,9 +10,14 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 
 /**
- * 380k - 500k req p second
+ * 380k - 510k req p second with remote clients. (extremal jit optimalizations?)
+ * 340k localhost
  */
 class Server {
+
+    private static final Statistics stats = new Statistics();
+
+
     public static void main(String args[]) throws Exception {
         InetSocketAddress bindAddr;
         if (args.length == 2) {
@@ -22,15 +27,9 @@ class Server {
         }
         DatagramSocket serverSocket = new DatagramSocket(bindAddr);
         byte[] receiveData = new byte[1024];
-        byte[] sendData = new byte[1024];
+        byte[] sendData = "dupa".getBytes();
         DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
-        String capitalizedSentence = "dupa";
-        sendData = capitalizedSentence.getBytes();
         DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length);
-        long testStartPeriod = System.currentTimeMillis();
-        long curTime = 0;
-        long handledRequests = 0;
-        long allReceived = 0;
         serverSocket.setSendBufferSize(66000 * 100);
         serverSocket.setReceiveBufferSize(66000 * 100);
         System.out.println("receive buff size: " + serverSocket.getReceiveBufferSize());
@@ -42,14 +41,7 @@ class Server {
             sendPacket.setAddress(IPAddress);
             sendPacket.setPort(port);
             serverSocket.send(sendPacket);
-            ++handledRequests;
-            ++allReceived;
-            curTime = System.currentTimeMillis();
-            if (curTime - testStartPeriod >= 1000) {
-                System.out.println(String.valueOf(curTime - testStartPeriod) + " " + handledRequests + " all received: " + allReceived);
-                handledRequests = 0;
-                testStartPeriod = curTime;
-            }
+            stats.onSent();
         }
     }
 }

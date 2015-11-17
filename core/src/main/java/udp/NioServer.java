@@ -10,12 +10,14 @@ import java.nio.channels.Selector;
 import java.util.concurrent.LinkedBlockingQueue;
 
 /**
- * @author Paweł Sikora
- *
- * 340k - 4010k req p second
+ * 270k req p second on localhost
+ * 340k - 430k req p second with spinning (32 retries)
+ * 300k - 380k req p second without retries.
  */
 public class NioServer {
 
+
+    private static final udp.Statistics stats = new udp.Statistics();
 
     public static void main(String[] args) throws Exception {
         InetSocketAddress bindAddr;
@@ -45,17 +47,15 @@ public class NioServer {
         Selector selector = Selector.open();
         channel.register(selector, SelectionKey.OP_READ);
 
-
-        long testStartPeriod = System.currentTimeMillis();
-        long curTime = 0;
-        long handledRequests = 0;
-        long allReceived = 0;
-        Statistics statistics = new Statistics(testStartPeriod, handledRequests, allReceived).invoke();
         while (true) {
-//            System.out.println("waiting");
+            //Here we wait for input messages. We can't get constant stream of input messages even with 150 clients
+            //on three remote hosts. In case of some longer request processing waiting may be unnecessary.
+            //with active waiting the results are better (spinning)
+//            System.out.printf("waiting");
             selector.select();
             SelectionKey key = selector.selectedKeys().iterator().next();
             if (key.isWritable()) {
+                //socket is always writable during tests so this branch of code is not used.
                 SocketAddress address;
                 while ((address = addresses.peek()) != null) {
                     int sentBytes = channel.send(sendBuffer, address);
@@ -66,14 +66,18 @@ public class NioServer {
                         break;
                     } else {
                         addresses.poll();
-                        statistics.invoke();
+                        stats.onSent();
                     }
                 }
 //                System.out.printf("Waiting for read");
                 key.interestOps(SelectionKey.OP_READ);
             } else if (key.isReadable()) {
                 while (true) {
-                    SocketAddress receiveAddress = channel.receive(receiveBuffer);
+                    int maxTriesCount = 1;
+                    SocketAddress receiveAddress = null;
+                    while (maxTriesCount-- > 0 && receiveAddress == null) {
+                        receiveAddress = channel.receive(receiveBuffer);
+                    }
                     receiveBuffer.clear();
                     if (receiveAddress != null) {
                         int sentBytes = channel.send(sendBuffer, receiveAddress);
@@ -88,7 +92,7 @@ public class NioServer {
                                 break;
                             }
                         } else {
-                            statistics.invoke();
+                            stats.onSent();
                             SocketAddress address;
                             while ((address = addresses.peek()) != null) {
                                 int sentBytes2 = channel.send(sendBuffer, address);
@@ -97,7 +101,7 @@ public class NioServer {
                                     break;
                                 } else {
                                     addresses.poll();
-                                    statistics.invoke();
+                                    stats.onSent();
                                 }
                             }
                         }
@@ -113,40 +117,4 @@ public class NioServer {
         }
     }
 
-    private static class Statistics {
-        private long testStartPeriod;
-        private long handledRequests;
-        private long allReceived;
-
-        public Statistics(long testStartPeriod, long handledRequests, long allReceived) {
-            this.testStartPeriod = testStartPeriod;
-            this.handledRequests = handledRequests;
-            this.allReceived = allReceived;
-        }
-
-        public long getTestStartPeriod() {
-            return testStartPeriod;
-        }
-
-        public long getHandledRequests() {
-            return handledRequests;
-        }
-
-        public long getAllReceived() {
-            return allReceived;
-        }
-
-        public Statistics invoke() {
-            long curTime;
-            ++handledRequests;
-            ++allReceived;
-            curTime = System.currentTimeMillis();
-            if (curTime - testStartPeriod >= 1000) {
-                System.out.println(String.valueOf(curTime - testStartPeriod) + " " + handledRequests + " all received: " + allReceived);
-                handledRequests = 0;
-                testStartPeriod = curTime;
-            }
-            return this;
-        }
-    }
 }

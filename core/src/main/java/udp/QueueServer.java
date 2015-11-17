@@ -1,7 +1,7 @@
 package udp;
 
 /**
- * Created by Paweł Sikora.
+ * .
  */
 
 import java.io.IOException;
@@ -17,6 +17,11 @@ import java.util.concurrent.TimeUnit;
  * 550000 req p second with clients on separate nodes.
  */
 class QueueServer {
+
+
+    private static final Statistics stats = new Statistics();
+
+
     public static void main(String args[]) throws Exception {
         InetSocketAddress bindAddr;
         if (args.length == 2) {
@@ -30,7 +35,6 @@ class QueueServer {
         System.out.println("receive buff size: " + serverSocket.getReceiveBufferSize());
         System.out.println("send buff size: " + serverSocket.getSendBufferSize());
         LinkedBlockingQueue<InetSocketAddress> addresses = new LinkedBlockingQueue<>(10000);
-        Statistics stats = new Statistics();
         Runnable receiver = () -> {
             byte[] receiveData = new byte[1024];
             try {
@@ -44,13 +48,11 @@ class QueueServer {
             }
         };
         Runnable sender = () -> {
-            byte[] sendData = new byte[1024];
-            String capitalizedSentence = "dupa";
-            sendData = capitalizedSentence.getBytes();
+            byte[] sendData = "dupa".getBytes();
             try {
                 while (true) {
                     InetSocketAddress address = null;
-                    address = addresses.poll(100, TimeUnit.DAYS);
+                    address = addresses.take();
                     DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length);
                     sendPacket.setAddress(address.getAddress());
                     sendPacket.setPort(address.getPort());

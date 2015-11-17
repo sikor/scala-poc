@@ -15,7 +15,8 @@ import scala.concurrent.duration._
 /**
   * @author Paweł Sikora
   *
-  *         180k - 190k req p seconds with remote clients.
+  *         180k - 190k req p second with remote clients. (with ack 120k p second)
+  *         155k localhost
   */
 object AkkaServer {
 

@@ -9,6 +9,7 @@ lazy val NioQueueServer = config("NioQueueServer").extend(Compile).describedAs("
 lazy val QueueServerWithProcessing = config("QueueServerWithProcessing").extend(Compile).describedAs("QueueServerWithProcessing")
 lazy val NettyServer = config("NettyServer").extend(Compile).describedAs("NettyServer")
 lazy val AkkaServer = config("AkkaServer").extend(Compile).describedAs("AkkaServer")
+lazy val MultiThreadedServer = config("MultiThreadedServer").extend(Compile).describedAs("MultiThreadedServer")
 
 
 val buildJars = taskKey[Unit]("build all jars")
@@ -61,6 +62,10 @@ lazy val core = (project in file("core")).settings(
   assemblyJarName in(AkkaServer, assembly) := "AkkaServer.jar",
   mainClass in(AkkaServer, assembly) := Some("udp.AkkaServer"),
 
+  inConfig(MultiThreadedServer)(AssemblyPlugin.projectSettings),
+  assemblyJarName in(MultiThreadedServer, assembly) := "MultiThreadedServer.jar",
+  mainClass in(MultiThreadedServer, assembly) := Some("udp.MultiThreadedServer"),
+
   buildJars := {
     (assembly in Server).value
     (assembly in Client).value
@@ -70,6 +75,7 @@ lazy val core = (project in file("core")).settings(
     (assembly in QueueServerWithProcessing).value
     (assembly in NettyServer).value
     (assembly in AkkaServer).value
+    (assembly in MultiThreadedServer).value
   }
 ).disablePlugins(JmhPlugin).disablePlugins(AssemblyPlugin)
 

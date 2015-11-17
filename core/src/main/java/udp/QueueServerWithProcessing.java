@@ -1,7 +1,7 @@
 package udp;
 
 /**
- * Created by Paweł Sikora.
+ * .
  */
 
 import java.io.IOException;
@@ -16,9 +16,11 @@ import java.util.concurrent.TimeUnit;
 /**
  * Configuration: receiver Thread -> Protocol thread -> Application thread -> sending Thread. Gives 350000 req p second on localhost.
  * Configuration: receiver Thread -> Protocol thread -> Application thread -> sending Thread. Gives 450000 - 500000  req p second with remote clients.
- * Configuration: receiver Thread -> Protocol thread -> Application thread. - similar results.
+ * (Without changing thread pools: 550000 req p second with clients on separate nodes.)
  */
 class QueueServerWithProcessing {
+
+    private static final Statistics stats = new Statistics();
 
     public static class Sender implements Runnable {
         final byte[] sendData = "dupa".getBytes();
@@ -72,7 +74,6 @@ class QueueServerWithProcessing {
         System.out.println("receive buff size: " + serverSocket.getReceiveBufferSize());
         System.out.println("send buff size: " + serverSocket.getSendBufferSize());
         final LinkedBlockingQueue<InetSocketAddress> addresses = new LinkedBlockingQueue<>(10000);
-        Statistics stats = new Statistics();
         Executor processingExecutor = Executors.newFixedThreadPool(1, r -> {
             Thread th = new Thread(r);
             th.setDaemon(true);
@@ -93,26 +94,17 @@ class QueueServerWithProcessing {
                 while (true) {
                     serverSocket.receive(receivePacket);
                     final InetSocketAddress addr = new InetSocketAddress(receivePacket.getAddress(), receivePacket.getPort());
-                    processingExecutor.execute(new Runnable() {
-                        @Override
-                        public void run() {
-                            long val = 0;
-                            try {
-//                                for (int i = 0; i < 1000; ++i) {
-//                                    val = System.currentTimeMillis();
-//                                }
+                    processingExecutor.execute(() -> {
+                        long val = 0;
+                        try {
 //                                addresses.add(addr);
-                                appLogicExecutor.execute(new Runnable() {
-                                    @Override
-                                    public void run() {
+                            appLogicExecutor.execute(() -> {
 //                                        addresses.add(addr);
-                                        sender.send(addr);
-                                    }
-                                });
-                            } catch (Exception e) {
-                                System.out.printf(String.valueOf(val));
-                                e.printStackTrace();
-                            }
+                                sender.send(addr);
+                            });
+                        } catch (Exception e) {
+                            System.out.printf(String.valueOf(val));
+                            e.printStackTrace();
                         }
                     });
                 }
@@ -120,7 +112,6 @@ class QueueServerWithProcessing {
                 e.printStackTrace();
             }
         };
-
 
 
         Thread senderThread = new Thread(sender);
