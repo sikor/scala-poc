@@ -1,4 +1,4 @@
-# scala-poc
+# UDP Servers Comparison
 
 ![alt tag](https://github.com/sikor/scala-poc/blob/master/doc/udpServersComparison_html_8f6433aa.png)
 
