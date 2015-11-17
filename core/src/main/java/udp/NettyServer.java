@@ -6,13 +6,20 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.epoll.EpollDatagramChannel;
+import io.netty.channel.epoll.EpollEventLoopGroup;
+import io.netty.channel.nio.NioEventLoop;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.util.CharsetUtil;
 
+import java.net.InetSocketAddress;
+
 /**
  * @author Paweł Sikora
+ *
+ * 200k - 250k req per s with remote clients.
  */
 
 public class NettyServer {
@@ -23,6 +30,12 @@ public class NettyServer {
     private static final Statistics stats = new Statistics();
 
     public static void main(String[] args) throws Exception {
+        InetSocketAddress bindAddr;
+        if (args.length == 2) {
+            bindAddr = new InetSocketAddress(args[0], Integer.valueOf(args[1]));
+        } else {
+            bindAddr = new InetSocketAddress(9876);
+        }
         EventLoopGroup executor = new NioEventLoopGroup(1);
         try {
             Bootstrap b = new Bootstrap();
@@ -30,7 +43,7 @@ public class NettyServer {
                     .channel(NioDatagramChannel.class)
                     .handler(new QuoteOfTheMomentServerHandler());
 
-            ChannelFuture channelFuture = b.bind(PORT);
+            ChannelFuture channelFuture = b.bind(bindAddr);
             channelFuture.sync().channel().closeFuture().await();
 
         } finally {

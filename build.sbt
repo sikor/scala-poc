@@ -7,6 +7,8 @@ lazy val QueueServer = config("QueueServer").extend(Compile).describedAs("QueueS
 lazy val NioServer = config("NioServer").extend(Compile).describedAs("NioServer")
 lazy val NioQueueServer = config("NioQueueServer").extend(Compile).describedAs("NioQueueServer")
 lazy val QueueServerWithProcessing = config("QueueServerWithProcessing").extend(Compile).describedAs("QueueServerWithProcessing")
+lazy val NettyServer = config("NettyServer").extend(Compile).describedAs("NettyServer")
+lazy val AkkaServer = config("AkkaServer").extend(Compile).describedAs("AkkaServer")
 
 
 val buildJars = taskKey[Unit]("build all jars")
@@ -21,6 +23,7 @@ lazy val core = (project in file("core")).settings(
     "org.monifu" %% "monifu" % "1.0-RC3",
     "org.eclipse.californium" % "californium-core" % "1.0.0-RC2",
     "io.netty" % "netty-all" % "4.0.20.Final",
+    "com.typesafe.akka" %% "akka-actor" % "2.4.0",
     "org.scalatest" % "scalatest_2.11" % "2.2.4" % "test"
   ),
   dependencyOverrides += "org.scala-lang.modules" % "scala-xml_2.11" % "1.0.4",
@@ -50,6 +53,14 @@ lazy val core = (project in file("core")).settings(
   assemblyJarName in(QueueServerWithProcessing, assembly) := "QueueServerWithProcessing.jar",
   mainClass in(QueueServerWithProcessing, assembly) := Some("udp.QueueServerWithProcessing"),
 
+  inConfig(NettyServer)(AssemblyPlugin.projectSettings),
+  assemblyJarName in(NettyServer, assembly) := "NettyServer.jar",
+  mainClass in(NettyServer, assembly) := Some("udp.NettyServer"),
+
+  inConfig(AkkaServer)(AssemblyPlugin.projectSettings),
+  assemblyJarName in(AkkaServer, assembly) := "AkkaServer.jar",
+  mainClass in(AkkaServer, assembly) := Some("udp.AkkaServer"),
+
   buildJars := {
     (assembly in Server).value
     (assembly in Client).value
@@ -57,6 +68,8 @@ lazy val core = (project in file("core")).settings(
     (assembly in NioServer).value
     (assembly in NioQueueServer).value
     (assembly in QueueServerWithProcessing).value
+    (assembly in NettyServer).value
+    (assembly in AkkaServer).value
   }
 ).disablePlugins(JmhPlugin).disablePlugins(AssemblyPlugin)
 
