@@ -25,6 +25,7 @@ object UdpStream {
 class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram] {
 
   private val stateRef: AtomicReference[State] = new AtomicReference[State](State(null, null))
+  private val outgoingMessages: LinkedBlockingQueue[Datagram] = new LinkedBlockingQueue[Datagram](2048)
 
   @tailrec
   final override def onSubscribe(subscriber: Subscriber[Datagram]): Unit = {
@@ -44,17 +45,11 @@ class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram]
     val serverSocket: DatagramSocket = new DatagramSocket(bindAddress)
     serverSocket.setSendBufferSize(66000 * 100)
     serverSocket.setReceiveBufferSize(66000 * 100)
-    val addresses: LinkedBlockingQueue[InetSocketAddress] = new LinkedBlockingQueue[InetSocketAddress](10000)
     val senderThread: Thread = new Thread(sender)
     val receiverThread: Thread = new Thread(receiver)
     senderThread.start()
     receiverThread.start()
   }
-
-  private def startReceiving(): Unit = {
-
-  }
-
 
   private def compareAndSet(expectedState: State, newState: State): Boolean = {
     val curState: State = stateRef.get()
@@ -91,20 +86,20 @@ class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram]
       }
     }
   }
-  val sender: Runnable = () -> {
-    byte[] sendData = "dupa".getBytes();
-    try {
-      while (true) {
-        InetSocketAddress address = null;
-        address = addresses.take();
-        DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length);
-        sendPacket.setAddress(address.getAddress());
-        sendPacket.setPort(address.getPort());
-        serverSocket.send(sendPacket);
-        stats.onSent();
+
+
+  val sender: Runnable = new Runnable() {
+    def run() = {
+      val socket: DatagramSocket = stateRef.get().socket
+      try {
+        while (true) {
+          val msg = outgoingMessages.take()
+          val packet: DatagramPacket = new DatagramPacket(msg.data.array(), msg.data.limit(), msg.address)
+          socket.send(packet)
+        }
+      } catch {
+        case NonFatal(e) => stateRef.get().subscriber.onError(e)
       }
-    } catch (Exception e) {
-      e.printStackTrace();
     }
   }
 
