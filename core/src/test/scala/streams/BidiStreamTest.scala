@@ -7,7 +7,8 @@ import monifu.concurrent.Implicits.globalScheduler
 import monifu.reactive.Ack.Continue
 import monifu.reactive.{Ack, Observable, Observer}
 import org.scalatest.{FunSuite, Matchers}
-import streams.BidiStream.{ProcessingAction, PushToInput, PushToOutput}
+import streams.bidi.BidiStream
+import BidiStream.{ProcessingAction, PushToInput, PushToOutput}
 
 import scala.collection.JavaConversions._
 import scala.concurrent.duration._

@@ -1,4 +1,4 @@
-package streams
+package streams.bidi
 
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicReference
@@ -7,7 +7,7 @@ import monifu.concurrent.atomic.Atomic
 import monifu.reactive.Ack.{Cancel, Continue}
 import monifu.reactive.exceptions.CompositeException
 import monifu.reactive.{Ack, Subject, Subscriber}
-import streams.BidiStream._
+import streams.bidi.BidiStream.{NoAction, PushToOutput, PushToInput, ProcessingAction}
 
 import scala.annotation.tailrec
 import scala.collection.JavaConversions._

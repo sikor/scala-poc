@@ -7,7 +7,8 @@ import monifu.concurrent.{Scheduler, UncaughtExceptionReporter}
 import monifu.reactive.Ack.Continue
 import monifu.reactive.{Ack, Observable}
 import org.openjdk.jmh.annotations._
-import streams.BidiStream.{ProcessingAction, _}
+import streams.bidi.BidiStream
+import BidiStream.{ProcessingAction, _}
 import streams.MergeAndGroupByBidi._
 import streams._
 
