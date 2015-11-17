@@ -24,14 +24,6 @@ class UdpStream(val bindAddress: InetSocketAddress, val maxReceiveSize: Int = 20
 
   private val stateRef: AtomicReference[State] = new AtomicReference[State](State(null, null))
 
-  private val workerThread: Thread = new Thread(new Runnable {
-    override def run(): Unit = {
-
-    }
-  })
-
-  private class WorkerThread
-
   @tailrec
   final override def onSubscribe(subscriber: Subscriber[Datagram]): Unit = {
     val seenState = stateRef.get()
@@ -54,10 +46,12 @@ class UdpStream(val bindAddress: InetSocketAddress, val maxReceiveSize: Int = 20
     channel.configureBlocking(false)
     val selector: Selector = Selector.open
     val selectionKey = channel.register(selector, SelectionKey.OP_READ)
-    val seenState = stateRef.get()
-    if (!compareAndSet(seenState, seenState.copy(selectionKey = selectionKey))) {
+    modState(stateRef.get(), s => s.copy(selectionKey = selectionKey))
 
-    }
+  }
+
+  private def startReceiving(): Unit = {
+
   }
 
 
@@ -67,6 +61,18 @@ class UdpStream(val bindAddress: InetSocketAddress, val maxReceiveSize: Int = 20
   }
 
   case class State(subscriber: Subscriber[Datagram], selectionKey: SelectionKey)
+
+  case class StateMod(mod: State => State)
+
+  @tailrec
+  private def modState(state: State, mod: State => State): State = {
+    val newState: State = mod(state)
+    if (!compareAndSet(state, newState)) {
+      modState(stateRef.get(), mod)
+    } else {
+      newState
+    }
+  }
 
 
 }
