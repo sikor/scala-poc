@@ -1,14 +1,16 @@
 package streams.io
 
-import java.net.{InetSocketAddress, SocketAddress}
+import java.net.{DatagramPacket, DatagramSocket, InetSocketAddress, SocketAddress}
 import java.nio.ByteBuffer
-import java.nio.channels.{SelectionKey, Selector, DatagramChannel}
+import java.nio.channels.SelectionKey
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicReference
 
 import monifu.reactive.{Observable, Subscriber}
 import streams.io.UdpStream.Datagram
 
 import scala.annotation.tailrec
+import scala.util.control.NonFatal
 
 
 object UdpStream {
@@ -20,7 +22,7 @@ object UdpStream {
 /**
   * Created by Paweł Sikora.
   */
-class UdpStream(val bindAddress: InetSocketAddress, val maxReceiveSize: Int = 2048) extends Observable[Datagram] {
+class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram] {
 
   private val stateRef: AtomicReference[State] = new AtomicReference[State](State(null, null))
 
@@ -33,21 +35,20 @@ class UdpStream(val bindAddress: InetSocketAddress, val maxReceiveSize: Int = 20
       if (!compareAndSet(seenState, seenState.copy(subscriber = subscriber))) {
         onSubscribe(subscriber)
       } else {
-        subscriber.scheduler.execute(new Runnable {
-          override def run(): Unit = bind()
-        })
+        bind()
       }
     }
   }
 
   private def bind(): Unit = {
-    val channel: DatagramChannel = DatagramChannel.open
-    channel.bind(bindAddress)
-    channel.configureBlocking(false)
-    val selector: Selector = Selector.open
-    val selectionKey = channel.register(selector, SelectionKey.OP_READ)
-    modState(stateRef.get(), s => s.copy(selectionKey = selectionKey))
-
+    val serverSocket: DatagramSocket = new DatagramSocket(bindAddress)
+    serverSocket.setSendBufferSize(66000 * 100)
+    serverSocket.setReceiveBufferSize(66000 * 100)
+    val addresses: LinkedBlockingQueue[InetSocketAddress] = new LinkedBlockingQueue[InetSocketAddress](10000)
+    val senderThread: Thread = new Thread(sender)
+    val receiverThread: Thread = new Thread(receiver)
+    senderThread.start()
+    receiverThread.start()
   }
 
   private def startReceiving(): Unit = {
@@ -60,7 +61,7 @@ class UdpStream(val bindAddress: InetSocketAddress, val maxReceiveSize: Int = 20
     (curState eq expectedState) && stateRef.compareAndSet(expectedState, newState)
   }
 
-  case class State(subscriber: Subscriber[Datagram], selectionKey: SelectionKey)
+  case class State(subscriber: Subscriber[Datagram], socket: DatagramSocket)
 
   case class StateMod(mod: State => State)
 
@@ -71,6 +72,39 @@ class UdpStream(val bindAddress: InetSocketAddress, val maxReceiveSize: Int = 20
       modState(stateRef.get(), mod)
     } else {
       newState
+    }
+  }
+
+
+  val receiver: Runnable = new Runnable() {
+    def run() = {
+      val receiveData: Array[Byte] = Array.ofDim(65000)
+      val socket: DatagramSocket = stateRef.get().socket
+      val subscriber: Subscriber[Datagram] = stateRef.get().subscriber
+      try {
+        while (true) {
+          val receivePacket = new DatagramPacket(receiveData, receiveData.length)
+          socket.receive(receivePacket)
+        }
+      } catch {
+        case NonFatal(e) => subscriber.onError(e)
+      }
+    }
+  }
+  val sender: Runnable = () -> {
+    byte[] sendData = "dupa".getBytes();
+    try {
+      while (true) {
+        InetSocketAddress address = null;
+        address = addresses.take();
+        DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length);
+        sendPacket.setAddress(address.getAddress());
+        sendPacket.setPort(address.getPort());
+        serverSocket.send(sendPacket);
+        stats.onSent();
+      }
+    } catch (Exception e) {
+      e.printStackTrace();
     }
   }
 
