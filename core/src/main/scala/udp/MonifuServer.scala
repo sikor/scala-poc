@@ -25,6 +25,7 @@ object MonifuServer {
       bindAddr = new InetSocketAddress(9876)
     }
     val stream = new UdpStream(bindAddr)
+    stream.bind()
     val obs = new AwaitableObserver((d: Datagram) => {
       val ack = stream.onNext(d)
       stats.onSent()

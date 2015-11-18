@@ -31,17 +31,14 @@ object UdpStream {
   */
 class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram] with Observer[Datagram] {
 
-  sealed trait SocketState
-
-  case object NotBound extends SocketState
-
-  case object Bound extends SocketState
-
-  case object Closing extends SocketState
-
-  case object Closed extends SocketState
-
-  sealed trait WorkerState
+  sealed trait WorkerState {
+    def closed(): WorkerState = {
+      this match {
+        case Running => Finishing
+        case _ => this
+      }
+    }
+  }
 
   case object NotStarted extends WorkerState
 
@@ -52,24 +49,24 @@ class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram]
   case object Finished extends WorkerState
 
 
-  case class State(subscriber: Subscriber[Datagram], socket: DatagramSocket, socketState: SocketState,
-                   stopSender: Boolean, stopReceiver: Boolean) {
+  case class State(subscriber: Subscriber[Datagram], socket: DatagramSocket,
+                   senderState: WorkerState, receiverState: WorkerState, wasBound: Boolean) {
     def senderShouldRun(): Boolean = {
-      !stopSender && socketState == Bound
+      senderState == Running || (senderState == Finishing && !outgoingMessages.isEmpty)
     }
 
     def receiverShouldRun(): Boolean = {
-      !stopReceiver && socketState == Bound
+      receiverState == Running
     }
 
-    def canCloseSocket: Boolean = {
-      stopSender && stopReceiver && socketState == Bound
-    }
+    def workerUseSocket(workerState: WorkerState): Boolean = workerState == Running || workerState == Finishing
+
+    def canCloseSocket: Boolean = !workerUseSocket(senderState) && !workerUseSocket(receiverState) && socket != null
+
   }
 
   private final val checkClosingIntervalMillis: Int = 2000
-  private val stateRef: AtomicReference[State] = new AtomicReference[State](State(null, null, NotBound,
-    stopSender = false, stopReceiver = false))
+  private val stateRef: AtomicReference[State] = new AtomicReference[State](State(null, null, NotStarted, NotStarted, wasBound = false))
   private val outgoingMessages: LinkedBlockingQueue[Datagram] = new LinkedBlockingQueue[Datagram]()
 
   @tailrec
@@ -77,12 +74,16 @@ class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram]
     val seenState = stateRef.get()
     if (seenState.subscriber != null) {
       subscriber.onError(new IllegalArgumentException("Maximally one subscriber is allowed."))
+    } else if (seenState.socket == null) {
+      subscriber.onError(new IllegalArgumentException("Socket is closed"))
     } else {
       if (!compareAndSet(seenState, seenState.copy(subscriber = subscriber))) {
         onSubscribe(subscriber)
       } else {
         try {
-          bind()
+          modState(stateRef.get(), s => s.copy(receiverState = Running))
+          val receiverThread: Thread = new Thread(Receiver)
+          receiverThread.start()
         } catch {
           case NonFatal(e) => subscriber.onError(e)
         }
@@ -90,50 +91,60 @@ class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram]
     }
   }
 
-  private def bind(): Unit = {
-    val serverSocket: DatagramSocket = new DatagramSocket(bindAddress)
-    serverSocket.setSendBufferSize(66000 * 100)
-    serverSocket.setReceiveBufferSize(66000 * 100)
-    serverSocket.setSoTimeout(checkClosingIntervalMillis)
-    modState(stateRef.get(), s => s.copy(socket = serverSocket, socketState = Bound))
-    val senderThread: Thread = new Thread(Sender)
-    val receiverThread: Thread = new Thread(Receiver)
-    senderThread.start()
-    receiverThread.start()
-  }
-
   @tailrec
-  private def canReceiveNextPacket(subAck: Future[Ack]): Boolean = {
-    if (!stateRef.get().receiverShouldRun()) {
-      false
-    } else if (subAck == Continue) {
-      true
-    } else if (subAck.isCompleted) {
-      subAck.value.get match {
-        case Success(a) => a match {
-          case Continue => true
-          case Cancel => close()
-            false
-        }
-        case Failure(t) => stateRef.get().subscriber.scheduler.reportFailure(t)
-          close()
-          false
-      }
+  final def bind(): Unit = {
+    val seenState: State = stateRef.get()
+    if (seenState.wasBound) {
+      throw new IllegalArgumentException("socket was already bound")
+    }
+    if (!compareAndSet(seenState, seenState.copy(wasBound = true))) {
+      bind()
     } else {
-      val result = try {
-        Await.result(subAck, checkClosingIntervalMillis millis)
-      } catch {
-        case _: TimeoutException => subAck
-      }
-      canReceiveNextPacket(result)
+      val serverSocket: DatagramSocket = new DatagramSocket(bindAddress)
+      serverSocket.setSendBufferSize(66000 * 100)
+      serverSocket.setReceiveBufferSize(66000 * 100)
+      serverSocket.setSoTimeout(checkClosingIntervalMillis)
+      modState(seenState, s => s.copy(socket = serverSocket))
     }
   }
 
-  private def close(): Unit = {
-    modState(stateRef.get(), s => s.copy(socketState = Closing))
+  /**
+    * If there is some worker than change its state to finishing and let him close the socket after work.
+    * Otherwise close the socket directly.
+    */
+  def close(): Unit = {
+    val seenState: State = stateRef.get()
+    val state = modState(seenState, s => s.copy(senderState = s.senderState.closed(), receiverState = s.receiverState.closed()))
+    tryCloseSocket(state)
   }
 
+
   object Receiver extends Runnable {
+
+    @tailrec
+    private def canReceiveNextPacket(subAck: Future[Ack]): Boolean = {
+      if (!stateRef.get().receiverShouldRun()) {
+        false
+      } else if (subAck == Continue) {
+        true
+      } else if (subAck.isCompleted) {
+        subAck.value.get match {
+          case Success(a) => a match {
+            case Continue => true
+            case Cancel => false
+          }
+          case Failure(t) => stateRef.get().subscriber.scheduler.reportFailure(t)
+            false
+        }
+      } else {
+        val result = try {
+          Await.result(subAck, checkClosingIntervalMillis millis)
+        } catch {
+          case _: TimeoutException => subAck
+        }
+        canReceiveNextPacket(result)
+      }
+    }
 
     private def pushToSubscriber(subscriber: Subscriber[Datagram], receivePacket: DatagramPacket): Future[Ack] = {
       val data = ByteBuffer.allocate(receivePacket.getLength)
@@ -165,6 +176,9 @@ class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram]
         }
       } catch {
         case NonFatal(e) => subscriber.scheduler.reportFailure(e)
+      } finally {
+        modState(stateRef.get(), s => s.copy(receiverState = Finished))
+        tryCloseSocket(stateRef.get())
       }
     }
   }
@@ -187,6 +201,7 @@ class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram]
       } catch {
         case NonFatal(e) => stateRef.get().subscriber.scheduler.reportFailure(e)
       } finally {
+        modState(stateRef.get(), s => s.copy(senderState = Finished))
         tryCloseSocket(stateRef.get())
       }
     }
@@ -195,12 +210,48 @@ class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram]
   @tailrec
   private def tryCloseSocket(state: State): Unit = {
     if (state.canCloseSocket) {
-      if (compareAndSet(state, state.copy(socketState = Closed))) {
+      if (compareAndSet(state, state.copy(socket = null))) {
         state.socket.close()
       } else {
         tryCloseSocket(stateRef.get())
       }
     }
+  }
+
+  @tailrec
+  final override def onNext(elem: Datagram): Future[Ack] = {
+    val state = stateRef.get()
+    if (state.socket == null) {
+      Future.failed(new IllegalStateException("Got onNext but socket is closed."))
+    }
+    state.senderState match {
+      case Running => outgoingMessages.add(elem)
+        Continue
+      case NotStarted =>
+        if (!compareAndSet(state, state.copy(senderState = Running))) {
+          onNext(elem)
+        } else {
+          val senderThread: Thread = new Thread(Sender)
+          senderThread.start()
+          outgoingMessages.add(elem)
+          Continue
+        }
+      case Finishing | Finished => Future.failed(new IllegalStateException("Got onNext after stream was closed."))
+    }
+  }
+
+  override def onError(ex: Throwable): Unit = {
+    UdpStream.logger.error("Received error in udp datagram sender", ex)
+    modState(stateRef.get(), s => s.copy(senderState = s.senderState.closed()))
+  }
+
+  override def onComplete(): Unit = {
+    modState(stateRef.get(), s => s.copy(senderState = s.senderState.closed()))
+  }
+
+  private def compareAndSet(expectedState: State, newState: State): Boolean = {
+    val curState: State = stateRef.get()
+    (curState eq expectedState) && stateRef.compareAndSet(expectedState, newState)
   }
 
   @tailrec
@@ -211,25 +262,5 @@ class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram]
     } else {
       newState
     }
-  }
-
-
-  private def compareAndSet(expectedState: State, newState: State): Boolean = {
-    val curState: State = stateRef.get()
-    (curState eq expectedState) && stateRef.compareAndSet(expectedState, newState)
-  }
-
-  override def onNext(elem: Datagram): Future[Ack] = {
-    outgoingMessages.add(elem)
-    Continue
-  }
-
-  override def onError(ex: Throwable): Unit = {
-    UdpStream.logger.error("Received error in udp datagram sender", ex)
-    modState(stateRef.get(), s => s.copy(stopSender = true))
-  }
-
-  override def onComplete(): Unit = {
-    modState(stateRef.get(), s => s.copy(stopSender = true))
   }
 }
