@@ -21,7 +21,6 @@ class QueueServer {
 
     private static final Statistics stats = new Statistics();
 
-
     public static void main(String args[]) throws Exception {
         InetSocketAddress bindAddr;
         if (args.length == 2) {

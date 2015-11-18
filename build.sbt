@@ -10,6 +10,7 @@ lazy val QueueServerWithProcessing = config("QueueServerWithProcessing").extend(
 lazy val NettyServer = config("NettyServer").extend(Compile).describedAs("NettyServer")
 lazy val AkkaServer = config("AkkaServer").extend(Compile).describedAs("AkkaServer")
 lazy val MultiThreadedServer = config("MultiThreadedServer").extend(Compile).describedAs("MultiThreadedServer")
+lazy val MonifuServer = config("MonifuServer").extend(Compile).describedAs("MonifuServer")
 
 
 val buildJars = taskKey[Unit]("build all jars")
@@ -66,6 +67,10 @@ lazy val core = (project in file("core")).settings(
   assemblyJarName in(MultiThreadedServer, assembly) := "MultiThreadedServer.jar",
   mainClass in(MultiThreadedServer, assembly) := Some("udp.MultiThreadedServer"),
 
+  inConfig(MonifuServer)(AssemblyPlugin.projectSettings),
+  assemblyJarName in(MonifuServer, assembly) := "MonifuServer.jar",
+  mainClass in(MonifuServer, assembly) := Some("udp.MonifuServer"),
+
   buildJars := {
     (assembly in Server).value
     (assembly in Client).value
@@ -76,6 +81,7 @@ lazy val core = (project in file("core")).settings(
     (assembly in NettyServer).value
     (assembly in AkkaServer).value
     (assembly in MultiThreadedServer).value
+    (assembly in MonifuServer).value
   }
 ).disablePlugins(JmhPlugin).disablePlugins(AssemblyPlugin)
 

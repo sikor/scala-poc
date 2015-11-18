@@ -63,8 +63,8 @@ object Main {
       PushToOutput(state.updateState(1))
     }
     val bidi = new BidiStream(procIn, procOut)
-    val inObs = new AwaitableObserver(m => scheduleResponse())
-    val outObs = new AwaitableObserver()
+    val inObs = new AwaitableObserverAny(m => scheduleResponse())
+    val outObs = new AwaitableObserverAny()
     bidi.in().subscribe(inObs)
     //    bidi.out().subscribe(outObs)
     bidi.out().onComplete()
@@ -76,8 +76,8 @@ object Main {
 
   def monifuTest(): Unit = {
     import MergeAndGroupByBidi._
-    val inObs = new AwaitableObserver()
-    val outObs = new AwaitableObserver()
+    val inObs = new AwaitableObserverAny()
+    val outObs = new AwaitableObserverAny()
 
     val s1 = Observable.range(0, iterations, 1).map(v => FromS1(v))
     val s2 = Observable.range(0, iterations, 1).take(0).map(v => FromS2(v))
@@ -93,7 +93,7 @@ object Main {
   }
 
   def monifuMappingTest(): Unit = {
-    val inObs = new AwaitableObserver(m => scheduleResponse())
+    val inObs = new AwaitableObserverAny(m => scheduleResponse())
     val state = new SynchState
     Observable.range(0, iterations, 1).map(state.updateState).subscribe(inObs)
     inObs.await(1000.second)

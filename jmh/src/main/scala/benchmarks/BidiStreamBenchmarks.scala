@@ -131,7 +131,7 @@ class BidiStreamBenchmarks {
       PushToInput(m)
     }
     val bidi = new BidiStream(procIn, (_: Any) => NoAction)
-    val inObs = new AwaitableObserver()
+    val inObs = new AwaitableObserverAny()
     bidi.in().subscribe(inObs)
     Observable.range(0, iterations, 1).subscribe(bidi.in())
     bidi.out().onComplete()
@@ -145,7 +145,7 @@ class BidiStreamBenchmarks {
       PushToInput(m)
     }
     val bidi = new BidiStream(procIn, (_: Any) => NoAction)
-    val inObs = new AwaitableObserver(m => scheduleResponse())
+    val inObs = new AwaitableObserverAny(m => scheduleResponse())
     bidi.in().subscribe(inObs)
     Observable.range(0, iterations, 1).subscribe(bidi.in())
     bidi.out().onComplete()
@@ -163,8 +163,8 @@ class BidiStreamBenchmarks {
       }
     }
     val bidi = new BidiStream(proc, proc)
-    val inObs = new AwaitableObserver(m => scheduleResponse())
-    val outObs = new AwaitableObserver(m => scheduleResponse())
+    val inObs = new AwaitableObserverAny(m => scheduleResponse())
+    val outObs = new AwaitableObserverAny(m => scheduleResponse())
     bidi.in().subscribe(inObs)
     bidi.out().subscribe(outObs)
     Observable.range(0, iterations, 1).subscribe(bidi.in())
@@ -184,8 +184,8 @@ class BidiStreamBenchmarks {
       }
     }
     val bidi = new BidiStream(proc, proc)
-    val inObs = new AwaitableObserver(m => scheduleResponse())
-    val outObs = new AwaitableObserver()
+    val inObs = new AwaitableObserverAny(m => scheduleResponse())
+    val outObs = new AwaitableObserverAny()
     bidi.in().subscribe(inObs)
     bidi.out().subscribe(outObs)
     Observable.range(0, iterations, 1).subscribe(bidi.in())
@@ -205,8 +205,8 @@ class BidiStreamBenchmarks {
       }
     }
     val bidi = new BidiStream(proc, proc)
-    val inObs = new AwaitableObserver()
-    val outObs = new AwaitableObserver()
+    val inObs = new AwaitableObserverAny()
+    val outObs = new AwaitableObserverAny()
     bidi.in().subscribe(inObs)
     bidi.out().subscribe(outObs)
     Observable.range(0, iterations, 1).subscribe(bidi.in())
@@ -218,7 +218,7 @@ class BidiStreamBenchmarks {
   @Benchmark
   @OperationsPerInvocation(1000)
   def MonifuMapOneStreamAsynchResponse(): Unit = {
-    val inObs = new AwaitableObserver(m => scheduleResponse())
+    val inObs = new AwaitableObserverAny(m => scheduleResponse())
     val state = new SimpleState
     Observable.range(0, iterations, 1).map(state.updateState).subscribe(inObs)
     inObs.await(4.second)
@@ -227,8 +227,8 @@ class BidiStreamBenchmarks {
   @Benchmark
   @OperationsPerInvocation(2000)
   def MonifuMapTwoStreamsSynchronizedState(): Unit = {
-    val inObs = new AwaitableObserver()
-    val outObs = new AwaitableObserver()
+    val inObs = new AwaitableObserverAny()
+    val outObs = new AwaitableObserverAny()
     val state = new SynchState
     Observable.range(0, iterations, 1).map(state.updateState).subscribe(inObs)
     Observable.range(0, iterations, 1).map(state.updateState).subscribe(outObs)
@@ -239,8 +239,8 @@ class BidiStreamBenchmarks {
   @Benchmark
   @OperationsPerInvocation(2000)
   def MonifuMapTwoStreamsSynchronizedStateAsynchResponse(): Unit = {
-    val inObs = new AwaitableObserver(m => scheduleResponse())
-    val outObs = new AwaitableObserver(m => scheduleResponse())
+    val inObs = new AwaitableObserverAny(m => scheduleResponse())
+    val outObs = new AwaitableObserverAny(m => scheduleResponse())
     val state = new SynchState
     Observable.range(0, iterations, 1).map(state.updateState).subscribe(inObs)
     Observable.range(0, iterations, 1).map(state.updateState).subscribe(outObs)
@@ -251,8 +251,8 @@ class BidiStreamBenchmarks {
   @Benchmark
   @OperationsPerInvocation(2000)
   def MonifuMergeAndGroupBy(): Unit = {
-    val inObs = new AwaitableObserver()
-    val outObs = new AwaitableObserver()
+    val inObs = new AwaitableObserverAny()
+    val outObs = new AwaitableObserverAny()
 
     val s1 = Observable.range(0, iterations, 1).map(v => FromS1(v))
     val s2 = Observable.range(0, iterations, 1).map(v => FromS2(v))
@@ -270,8 +270,8 @@ class BidiStreamBenchmarks {
   @Benchmark
   @OperationsPerInvocation(2000)
   def MonifuMergeAndGroupByAsynchResponse(): Unit = {
-    val inObs = new AwaitableObserver(m => scheduleResponse())
-    val outObs = new AwaitableObserver(m => scheduleResponse())
+    val inObs = new AwaitableObserverAny(m => scheduleResponse())
+    val outObs = new AwaitableObserverAny(m => scheduleResponse())
 
     val s1 = Observable.range(0, iterations, 1).map(v => FromS1(v))
     val s2 = Observable.range(0, iterations, 1).map(v => FromS2(v))
@@ -289,8 +289,8 @@ class BidiStreamBenchmarks {
   @Benchmark
   @OperationsPerInvocation(2000)
   def MonifuMergeAndGroupByOneWayAsynchResponse(): Unit = {
-    val inObs = new AwaitableObserver(m => scheduleResponse())
-    val outObs = new AwaitableObserver()
+    val inObs = new AwaitableObserverAny(m => scheduleResponse())
+    val outObs = new AwaitableObserverAny()
 
     val s1 = Observable.range(0, iterations, 1).map(v => FromS1(v))
     val s2 = Observable.range(0, iterations, 1).map(v => FromS2(v))
@@ -308,8 +308,8 @@ class BidiStreamBenchmarks {
   @Benchmark
   @OperationsPerInvocation(1000)
   def MonifuMergeAndGroupByOneDirection(): Unit = {
-    val inObs = new AwaitableObserver()
-    val outObs = new AwaitableObserver()
+    val inObs = new AwaitableObserverAny()
+    val outObs = new AwaitableObserverAny()
 
     val s1 = Observable.range(0, iterations, 1).map(v => FromS1(v))
     val s2 = Observable.range(0, iterations, 1).take(0).map(v => FromS2(v))

@@ -9,7 +9,10 @@ import scala.concurrent.{Await, Future, Promise}
 /**
   * Created by Paweł Sikora.
   */
-class AwaitableObserver(onNextFunc: Any => Future[Ack] = _ => Continue) extends Observer[Any] {
+
+class AwaitableObserverAny(onNextFunc: Any => Future[Ack] = (_: Any) => Continue) extends AwaitableObserver[Any]
+
+class AwaitableObserver[-T](onNextFunc: T => Future[Ack] = (_: T) => Continue) extends Observer[T] {
   private val completed = Promise[Unit]
 
   def onFinished: Future[Unit] = completed.future
@@ -19,7 +22,7 @@ class AwaitableObserver(onNextFunc: Any => Future[Ack] = _ => Continue) extends 
     Await.result(onFinished, duration)
   }
 
-  override def onNext(elem: Any): Future[Ack] = onNextFunc(elem)
+  override def onNext(elem: T): Future[Ack] = onNextFunc(elem)
 
   override def onError(ex: Throwable): Unit = completed.failure(ex)
 
