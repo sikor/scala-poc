@@ -7,16 +7,20 @@ import java.util.concurrent.{LinkedBlockingQueue, TimeUnit}
 
 import monifu.reactive.Ack.{Cancel, Continue}
 import monifu.reactive.{Observer, Ack, Observable, Subscriber}
+import org.slf4j.{LoggerFactory, Logger}
 import streams.io.UdpStream.Datagram
 
 import scala.annotation.tailrec
 import scala.concurrent.duration._
 import scala.concurrent.{TimeoutException, Await, Future}
+import scala.language.postfixOps
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success}
 
 
 object UdpStream {
+
+  val logger: Logger = LoggerFactory.getLogger(UdpStream.getClass)
 
   case class Datagram(data: ByteBuffer, address: SocketAddress)
 
@@ -37,12 +41,36 @@ class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram]
 
   case object Closed extends SocketState
 
+  sealed trait WorkerState
 
-  case class State(subscriber: Subscriber[Datagram], socket: DatagramSocket, socketState: SocketState)
+  case object NotStarted extends WorkerState
+
+  case object Running extends WorkerState
+
+  case object Finishing extends WorkerState
+
+  case object Finished extends WorkerState
+
+
+  case class State(subscriber: Subscriber[Datagram], socket: DatagramSocket, socketState: SocketState,
+                   stopSender: Boolean, stopReceiver: Boolean) {
+    def senderShouldRun(): Boolean = {
+      !stopSender && socketState == Bound
+    }
+
+    def receiverShouldRun(): Boolean = {
+      !stopReceiver && socketState == Bound
+    }
+
+    def canCloseSocket: Boolean = {
+      stopSender && stopReceiver && socketState == Bound
+    }
+  }
 
   private final val checkClosingIntervalMillis: Int = 2000
-  private val stateRef: AtomicReference[State] = new AtomicReference[State](State(null, null, NotBound))
-  private val outgoingMessages: LinkedBlockingQueue[Datagram] = new LinkedBlockingQueue[Datagram](2048)
+  private val stateRef: AtomicReference[State] = new AtomicReference[State](State(null, null, NotBound,
+    stopSender = false, stopReceiver = false))
+  private val outgoingMessages: LinkedBlockingQueue[Datagram] = new LinkedBlockingQueue[Datagram]()
 
   @tailrec
   final override def onSubscribe(subscriber: Subscriber[Datagram]): Unit = {
@@ -76,7 +104,7 @@ class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram]
 
   @tailrec
   private def canReceiveNextPacket(subAck: Future[Ack]): Boolean = {
-    if (stateRef.get().socketState != Bound) {
+    if (!stateRef.get().receiverShouldRun()) {
       false
     } else if (subAck == Continue) {
       true
@@ -97,11 +125,7 @@ class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram]
       } catch {
         case _: TimeoutException => subAck
       }
-      if (stateRef.get().socketState != Bound) {
-        false
-      } else {
-        canReceiveNextPacket(result)
-      }
+      canReceiveNextPacket(result)
     }
   }
 
@@ -148,22 +172,36 @@ class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram]
 
   object Sender extends Runnable {
     def run() = {
-      val socket: DatagramSocket = stateRef.get().socket
       try {
-        while (stateRef.get().socketState == Bound) {
+        val socket: DatagramSocket = stateRef.get().socket
+        var state = stateRef.get()
+        while (state.senderShouldRun()) {
           //wake up every checkClosingIntervalMillis to check if stream is closing
           val msg = outgoingMessages.poll(checkClosingIntervalMillis, TimeUnit.MILLISECONDS)
           if (msg != null) {
             val packet: DatagramPacket = new DatagramPacket(msg.data.array(), msg.data.limit(), msg.address)
             socket.send(packet)
           }
+          state = stateRef.get()
         }
       } catch {
         case NonFatal(e) => stateRef.get().subscriber.scheduler.reportFailure(e)
+      } finally {
+        tryCloseSocket(stateRef.get())
       }
     }
   }
 
+  @tailrec
+  private def tryCloseSocket(state: State): Unit = {
+    if (state.canCloseSocket) {
+      if (compareAndSet(state, state.copy(socketState = Closed))) {
+        state.socket.close()
+      } else {
+        tryCloseSocket(stateRef.get())
+      }
+    }
+  }
 
   @tailrec
   private def modState(state: State, mod: State => State): State = {
@@ -187,10 +225,11 @@ class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram]
   }
 
   override def onError(ex: Throwable): Unit = {
-    ex.printStackTrace()
+    UdpStream.logger.error("Received error in udp datagram sender", ex)
+    modState(stateRef.get(), s => s.copy(stopSender = true))
   }
 
   override def onComplete(): Unit = {
-    println("completed")
+    modState(stateRef.get(), s => s.copy(stopSender = true))
   }
 }
