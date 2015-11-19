@@ -3,15 +3,15 @@ package streams.io
 import java.net.InetSocketAddress
 
 import monifu.reactive.{Observable, Observer}
-import streams.io.Coap.Session
+import streams.io.CoapSessions.CoapSession
 
 /**
   * Created by Paweł Sikora.
   */
-object Coap {
+object CoapSessions {
   type CoapMsg = Any
 
-  sealed trait Session {
+  sealed trait CoapSession {
     def incomingMessages: Observable[CoapMsg]
 
     def outgoingMessages: Observer[CoapMsg]
@@ -21,10 +21,10 @@ object Coap {
 
 }
 
-trait Coap {
+trait CoapSessions {
 
-  def sessions(): Observable[Session]
+  def sessions(): Observable[CoapSession]
 
-  def getOrCreateSession(address: InetSocketAddress): Session
+  def getOrCreateSession(address: InetSocketAddress): CoapSession
 
 }

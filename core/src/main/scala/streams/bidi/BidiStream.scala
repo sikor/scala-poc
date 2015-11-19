@@ -52,7 +52,7 @@ object BidiStream {
   * @param onOutputMessage will be called for each message from output subject
   */
 class BidiStream[IC, IP, OC, OP](onInputMessage: IC => ProcessingAction[IP, OP],
-                                 onOutputMessage: OC => ProcessingAction[IP, OP]) {
+                                 onOutputMessage: OC => ProcessingAction[IP, OP]) extends InOut[IP, OC] {
 
   private[this] val stateRef = new AtomicReference[State](State(Inactive, Inactive, isLocked = false, null, null, null))
   private[this] val completedProducersCount = Atomic(0)
@@ -486,5 +486,11 @@ class BidiStream[IC, IP, OC, OP](onInputMessage: IC => ProcessingAction[IP, OP],
     */
   case class NewStateAndEffect(newState: State, effect: () => Future[Ack]) extends AtomicUpdate
 
+  override def onNext(elem: OC): Future[Ack] = out().onNext(elem)
 
+  override def onError(ex: Throwable): Unit = out().onError(ex)
+
+  override def onComplete(): Unit = out().onComplete()
+
+  override def onSubscribe(subscriber: Subscriber[IP]): Unit = in().onSubscribe(subscriber)
 }

@@ -6,13 +6,14 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{LinkedBlockingQueue, TimeUnit}
 
 import monifu.reactive.Ack.{Cancel, Continue}
-import monifu.reactive.{Observer, Ack, Observable, Subscriber}
-import org.slf4j.{LoggerFactory, Logger}
+import monifu.reactive.{Ack, Subscriber}
+import org.slf4j.{Logger, LoggerFactory}
+import streams.bidi.InOut
 import streams.io.UdpStream.Datagram
 
 import scala.annotation.tailrec
 import scala.concurrent.duration._
-import scala.concurrent.{TimeoutException, Await, Future}
+import scala.concurrent.{Await, Future, TimeoutException}
 import scala.language.postfixOps
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success}
@@ -29,7 +30,7 @@ object UdpStream {
 /**
   * Created by Paweł Sikora.
   */
-class UdpStream(val bindAddress: InetSocketAddress) extends Observable[Datagram] with Observer[Datagram] {
+class UdpStream(val bindAddress: InetSocketAddress) extends InOut[Datagram, Datagram] {
 
   sealed trait WorkerState {
     def closed(): WorkerState = {
