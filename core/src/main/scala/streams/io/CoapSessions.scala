@@ -1,9 +1,16 @@
 package streams.io
 
 import java.net.InetSocketAddress
+import java.util
 
-import monifu.reactive.{Observable, Observer}
-import streams.io.CoapSessions.CoapSession
+import monifu.reactive.{Subscriber, Ack, Observable}
+import streams.bidi.BidiStream.ProcessingAction
+import streams.bidi.{BidiProcessor, InOut}
+import streams.io.CoapSessions.{CoapClient, CoapSession}
+import streams.io.UdpStream.Datagram
+
+import scala.concurrent.Future
+
 
 /**
   * Created by Paweł Sikora.
@@ -11,20 +18,26 @@ import streams.io.CoapSessions.CoapSession
 object CoapSessions {
   type CoapMsg = Any
 
-  sealed trait CoapSession {
-    def incomingMessages: Observable[CoapMsg]
 
-    def outgoingMessages: Observer[CoapMsg]
+  class CoapSession(val address: InetSocketAddress) extends InOut[CoapMsg, CoapMsg] {
+    override def onSubscribe(subscriber: Subscriber[CoapMsg]): Unit = ???
 
-    def cancel(): Unit
+    override def onError(ex: Throwable): Unit = ???
+
+    override def onComplete(): Unit = ???
+
+    override def onNext(elem: CoapMsg): Future[Ack] = ???
   }
+
+  class CoapClient(val stream: InOut[CoapMsg, CoapMsg], val address: InetSocketAddress)
 
 }
 
-trait CoapSessions {
+class CoapSessions extends BidiProcessor[Datagram, CoapSession, CoapClient, Observable[Datagram]] {
 
-  def sessions(): Observable[CoapSession]
+  private val sessions = new util.HashMap[InetSocketAddress, CoapSession]
 
-  def getOrCreateSession(address: InetSocketAddress): CoapSession
+  override def onInputMessage(inputMsg: Datagram): ProcessingAction[CoapSession, Observable[Datagram]] = ???
 
+  override def onOutputMessage(outputMsg: CoapClient): ProcessingAction[CoapSession, Observable[Datagram]] = ???
 }

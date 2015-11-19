@@ -23,7 +23,7 @@ object UdpStream {
 
   val logger: Logger = LoggerFactory.getLogger(UdpStream.getClass)
 
-  case class Datagram(data: ByteBuffer, address: SocketAddress)
+  case class Datagram(data: ByteBuffer, address: InetSocketAddress)
 
 }
 

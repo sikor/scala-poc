@@ -3,11 +3,13 @@ package streams.bidi
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicReference
 
+import _root_.streams.SameThreadExecutionContext
+import monifu.concurrent.Scheduler
 import monifu.concurrent.atomic.Atomic
 import monifu.reactive.Ack.{Cancel, Continue}
 import monifu.reactive.exceptions.CompositeException
-import monifu.reactive.{Ack, Subject, Subscriber}
-import streams.bidi.BidiStream.{NoAction, PushToOutput, PushToInput, ProcessingAction}
+import monifu.reactive._
+import _root_.streams.bidi.BidiStream._
 
 import scala.annotation.tailrec
 import scala.collection.JavaConversions._
@@ -26,11 +28,15 @@ object BidiStream {
     */
   sealed trait ProcessingAction[+IP, +OP]
 
-  case class PushToInput[IP](msg: IP) extends ProcessingAction[IP, Nothing]
+  case class PushToBoth[IP, OP](inputMsg: IP, outputMsg: OP) extends ProcessingAction[IP, OP]
 
-  case class PushToOutput[OP](msg: OP) extends ProcessingAction[Nothing, OP]
+  sealed trait SimpleProcessingAction[+IP, +OP] extends ProcessingAction[IP, OP]
 
-  case object NoAction extends ProcessingAction[Nothing, Nothing]
+  case class PushToInput[IP](msg: IP) extends SimpleProcessingAction[IP, Nothing]
+
+  case class PushToOutput[OP](msg: OP) extends SimpleProcessingAction[Nothing, OP]
+
+  case object NoAction extends SimpleProcessingAction[Nothing, Nothing]
 
 
 }
@@ -157,6 +163,21 @@ class BidiStream[IC, IP, OC, OP](onInputMessage: IC => ProcessingAction[IP, OP],
   }
 
 
+  private def mergeAcks(fut1: Future[Ack], fut2: Future[Ack]): Future[Ack] = {
+    if (fut1 == Continue && fut2 == Continue) {
+      Continue
+    } else if (fut1 == Continue) {
+      fut2
+    } else if (fut2 == Continue) {
+      fut1
+    } else {
+      fut1.flatMap {
+        case Continue => fut2
+        case Cancel => Cancel
+      }(SameThreadExecutionContext) //TODO: transform to not loss exception from fut2
+    }
+  }
+
   /**
     * Access to this method is synchronized using [[State.isLocked]].
     * It can modify the state of the subscriber.
@@ -166,8 +187,21 @@ class BidiStream[IC, IP, OC, OP](onInputMessage: IC => ProcessingAction[IP, OP],
     * If we send message to subscriber and it will answer us immediately with Continue than we don't have to modify state because
     * it would be changed from WaitingForMessage -> WaitingForMessage.
     */
-  @tailrec
   private def processResult(state: State, action: ProcessingAction[IP, OP]): Future[Ack] = {
+    action match {
+      case s: SimpleProcessingAction[IP, OP] => processSimpleResult(state, s)
+      case PushToBoth(inMsg, outMsg) =>
+        val fut1 = processSimpleResult(state, PushToInput(inMsg))
+        val fut2 = processSimpleResult(state, PushToOutput(outMsg))
+        mergeAcks(fut1, fut2)
+    }
+  }
+
+  /**
+    * For processResult method.
+    */
+  @tailrec
+  private def processSimpleResult(state: State, action: SimpleProcessingAction[IP, OP]): Future[Ack] = {
     val res = action match {
       case PushToInput(msg) => pushMsg(state, msg, InputLens)
       case PushToOutput(msg) => pushMsg(state, msg, OutputLens)
@@ -177,10 +211,10 @@ class BidiStream[IC, IP, OC, OP](onInputMessage: IC => ProcessingAction[IP, OP],
       //here we can do fast loop optimization if we immediately got Continue from subscriber. In such situation we don't
       //change the state from WaitingForMessage to WaitingForAck. The state just remains WaitingForMessage and we have one
       //compareAndSet operation less.
-      case fast: FastLoopOptimization[IP, OP] => Continue
+      case fast: FastLoopOptimization[IP, OP] => Continue //here don't perform state change because it is already WaitingForMsg
       case NewStateAndEffect(newState, effect) =>
         if (!compareAndSet(state, newState)) {
-          processResult(stateRef.get, action)
+          processSimpleResult(stateRef.get, action)
         } else {
           effect()
         }
@@ -188,6 +222,7 @@ class BidiStream[IC, IP, OC, OP](onInputMessage: IC => ProcessingAction[IP, OP],
         runChangeState(state, ch)
     }
   }
+
 
   private def pushMsg[C, P](s: State, msg: P, lens: SubjectLens[C, P]): AtomicUpdate = {
     lens.getSubscriberState(s) match {
@@ -266,6 +301,7 @@ class BidiStream[IC, IP, OC, OP](onInputMessage: IC => ProcessingAction[IP, OP],
                 //We use pushToSubscriber method to get correct state modification.
                 //We assume that before calling pushToSubscriber method state is WaitingForMessage but we don't change the state explicitly
                 val res = pushToSubscriber(pendingMsg, sub, subscriberLens)
+                //change state even if it was FastLoopOptimization because the state is PendingMessage currently so we have to change it to WaitingForMsg or WaitingForAck
                 ChangeStateAndEffect(res.stateMod, () => {
                   //Bind promise for producer of pending message.
                   pendingPromise.completeWith(res.effect())
@@ -481,16 +517,26 @@ class BidiStream[IC, IP, OC, OP](onInputMessage: IC => ProcessingAction[IP, OP],
     override val effect: () => Future[Ack] = () => Continue
   }
 
+
   /**
     * Means that algorithm which constructed this effect should be repeated if expected state does not match
     */
   case class NewStateAndEffect(newState: State, effect: () => Future[Ack]) extends AtomicUpdate
 
-  override def onNext(elem: OC): Future[Ack] = out().onNext(elem)
 
-  override def onError(ex: Throwable): Unit = out().onError(ex)
+  def bindSourceProducer(producer: Observable[IC])(implicit s: Scheduler): Unit = {
+    producer.subscribe(input)
+  }
 
-  override def onComplete(): Unit = out().onComplete()
+  def bindSourceConsumer(consumer: Observer[OP])(implicit s: Scheduler): Unit = {
+    output.subscribe(consumer)(s)
+  }
 
-  override def onSubscribe(subscriber: Subscriber[IP]): Unit = in().onSubscribe(subscriber)
+  override def onNext(elem: OC): Future[Ack] = output.onNext(elem)
+
+  override def onError(ex: Throwable): Unit = output.onError(ex)
+
+  override def onComplete(): Unit = output.onComplete()
+
+  override def onSubscribe(subscriber: Subscriber[IP]): Unit = input.onSubscribe(subscriber)
 }

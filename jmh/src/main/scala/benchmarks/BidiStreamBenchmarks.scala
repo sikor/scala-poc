@@ -154,13 +154,30 @@ class BidiStreamBenchmarks {
 
   @OperationsPerInvocation(2000)
   @Benchmark
-  def BidiStreamTwoDirectionsAsynch(): Unit = {
+  def BidiStreamBothDirectionsAsynch(): Unit = {
     def proc(m: Long): ProcessingAction[Long, Long] = {
       if (m % 2 == 0) {
         PushToInput(m)
       } else {
         PushToOutput(m)
       }
+    }
+    val bidi = new BidiStream(proc, proc)
+    val inObs = new AwaitableObserverAny(m => scheduleResponse())
+    val outObs = new AwaitableObserverAny(m => scheduleResponse())
+    bidi.in().subscribe(inObs)
+    bidi.out().subscribe(outObs)
+    Observable.range(0, iterations, 1).subscribe(bidi.in())
+    Observable.range(0, iterations, 1).subscribe(bidi.out())
+    inObs.await(4.second)
+    outObs.await(4.second)
+  }
+
+  @OperationsPerInvocation(2000)
+  @Benchmark
+  def BidiStreamBothDirectionsBroadcastAsynch(): Unit = {
+    def proc(m: Long): ProcessingAction[Long, Long] = {
+      PushToBoth(m, m)
     }
     val bidi = new BidiStream(proc, proc)
     val inObs = new AwaitableObserverAny(m => scheduleResponse())

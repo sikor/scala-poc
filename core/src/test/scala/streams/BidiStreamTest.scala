@@ -5,37 +5,37 @@ import java.util.concurrent.ConcurrentLinkedQueue
 
 import monifu.concurrent.Implicits.globalScheduler
 import monifu.reactive.Ack.Continue
-import monifu.reactive.{Ack, Observable, Observer}
+import monifu.reactive.{Ack, Observable}
 import org.scalatest.{FunSuite, Matchers}
 import streams.bidi.BidiStream
-import BidiStream.{ProcessingAction, PushToInput, PushToOutput}
+import streams.bidi.BidiStream.{ProcessingAction, PushToBoth, PushToInput, PushToOutput}
 
 import scala.collection.JavaConversions._
 import scala.concurrent.duration._
-import scala.concurrent.{Await, Future, Promise}
+import scala.concurrent.{Future, Promise}
 import scala.util.Random
 
 /**
   * Created by Paweł Sikora.
   */
 class BidiStreamTest extends FunSuite with Matchers {
-
-  class AwaitableObserver(onNextFunc: Any => Future[Ack] = _ => Continue) extends Observer[Any] {
-    private val completed = Promise[Unit]
-
-    def onFinished: Future[Unit] = completed.future
-
-    def await(duration: FiniteDuration): Unit = {
-      // await for result to throw exception if any occurred
-      Await.result(onFinished, duration)
-    }
-
-    override def onNext(elem: Any): Future[Ack] = onNextFunc(elem)
-
-    override def onError(ex: Throwable): Unit = completed.failure(ex)
-
-    override def onComplete(): Unit = completed.success(())
-  }
+  //
+  //  class AwaitableObserver(onNextFunc: Any => Future[Ack] = _ => Continue) extends Observer[Any] {
+  //    private val completed = Promise[Unit]
+  //
+  //    def onFinished: Future[Unit] = completed.future
+  //
+  //    def await(duration: FiniteDuration): Unit = {
+  //      // await for result to throw exception if any occurred
+  //      Await.result(onFinished, duration)
+  //    }
+  //
+  //    override def onNext(elem: Any): Future[Ack] = onNextFunc(elem)
+  //
+  //    override def onError(ex: Throwable): Unit = completed.failure(ex)
+  //
+  //    override def onComplete(): Unit = completed.success(())
+  //  }
 
   test("Processor functions should be called atomically") {
     val processingEvents = new ConcurrentLinkedQueue[String]()
@@ -54,8 +54,8 @@ class BidiStreamTest extends FunSuite with Matchers {
       PushToOutput(m)
     }
     val bidi = new BidiStream(procIn, procOut)
-    val inObs = new AwaitableObserver()
-    val outObs = new AwaitableObserver()
+    val inObs = new AwaitableObserver[Long]()
+    val outObs = new AwaitableObserver[Long]()
     bidi.in().subscribe(inObs)
     bidi.out().subscribe(outObs)
     Observable.range(0, 100, 1).subscribe(bidi.in())
@@ -81,12 +81,12 @@ class BidiStreamTest extends FunSuite with Matchers {
       PushToOutput(m)
     }
     val bidi = new BidiStream(procIn, procOut)
-    val inObs = new AwaitableObserver(m => {
-      inputMessages.add(m.asInstanceOf[Long])
+    val inObs = new AwaitableObserver[Long](m => {
+      inputMessages.add(m)
       Continue
     })
-    val outObs = new AwaitableObserver(m => {
-      outputMessages.add(m.asInstanceOf[Long])
+    val outObs = new AwaitableObserver[Long](m => {
+      outputMessages.add(m)
       Continue
     })
     bidi.in().subscribe(inObs)
@@ -117,12 +117,12 @@ class BidiStreamTest extends FunSuite with Matchers {
       PushToInput(m)
     }
     val bidi = new BidiStream(procIn, procOut)
-    val inObs = new AwaitableObserver(m => {
-      inputMessages.add(m.asInstanceOf[Long])
+    val inObs = new AwaitableObserver[Long](m => {
+      inputMessages.add(m)
       Continue
     })
-    val outObs = new AwaitableObserver(m => {
-      outputMessages.add(m.asInstanceOf[Long])
+    val outObs = new AwaitableObserver[Long](m => {
+      outputMessages.add(m)
       Continue
     })
     bidi.in().subscribe(inObs)
@@ -145,8 +145,8 @@ class BidiStreamTest extends FunSuite with Matchers {
       PushToOutput(m)
     }
     val bidi = new BidiStream(procIn, procOut)
-    val inObs = new AwaitableObserver(m => {
-      inputMessages.add(m.asInstanceOf[Long])
+    val inObs = new AwaitableObserver[Long](m => {
+      inputMessages.add(m)
       Continue
     })
     bidi.in().subscribe(inObs)
@@ -178,12 +178,12 @@ class BidiStreamTest extends FunSuite with Matchers {
       promise.future
     }
     val bidi = new BidiStream(procIn, procOut)
-    val inObs = new AwaitableObserver(m => {
-      inputMessages.add(m.asInstanceOf[Long])
+    val inObs = new AwaitableObserver[Long](m => {
+      inputMessages.add(m)
       scheduleResponse()
     })
-    val outObs = new AwaitableObserver(m => {
-      outputMessages.add(m.asInstanceOf[Long])
+    val outObs = new AwaitableObserver[Long](m => {
+      outputMessages.add(m)
       scheduleResponse()
     })
     bidi.in().subscribe(inObs)
@@ -201,6 +201,44 @@ class BidiStreamTest extends FunSuite with Matchers {
       assert(inputMessagesArr(i).asInstanceOf[Long] == i)
       assert(outputMessagesArr(i).asInstanceOf[Long] == i + 100)
     }
+  }
+
+  test("Should broadcast response to both outputs") {
+    val inputMessages = new ConcurrentLinkedQueue[Long]()
+    val outputMessages = new ConcurrentLinkedQueue[Long]()
+    def procIn(m: Long): ProcessingAction[Long, Long] = {
+      PushToBoth(m, m)
+    }
+
+    def procOut(m: Long): ProcessingAction[Long, Long] = {
+      PushToBoth(m, m)
+    }
+    def scheduleResponse(): Future[Ack] = {
+      val promise = Promise[Ack]
+      globalScheduler.execute(new Runnable {
+        override def run(): Unit = {
+          promise.success(Continue)
+        }
+      })
+      promise.future
+    }
+    val bidi = new BidiStream(procIn, procOut)
+    val inObs = new AwaitableObserver[Long](m => {
+      inputMessages.add(m)
+      scheduleResponse()
+    })
+    val outObs = new AwaitableObserver[Long](m => {
+      outputMessages.add(m)
+      scheduleResponse()
+    })
+    bidi.in().subscribe(inObs)
+    bidi.out().subscribe(outObs)
+    Observable.range(0, 1000, 1).subscribe(bidi.in())
+    Observable.range(1000, 2000, 1).subscribe(bidi.out())
+    inObs.await(4.second)
+    outObs.await(4.second)
+    inputMessages.toSet.size should be(2000)
+    outputMessages.toSet.size should be(2000)
   }
 
 }
