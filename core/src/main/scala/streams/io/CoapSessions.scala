@@ -3,6 +3,7 @@ package streams.io
 import java.net.InetSocketAddress
 import java.util
 
+import monifu.concurrent.Scheduler
 import streams.bidi.BidiStream.{PushToOutput, NoAction, ProcessingAction, PushToBoth}
 import streams.bidi.{BidiProcessor, InOut}
 import streams.io.CoapSessions.{CoapClient, CoapSession}
@@ -28,7 +29,8 @@ object CoapSessions {
 
   }
 
-  class CoapClient(val stream: InOut[CoapMsg, CoapMsg], val targetAddress: InetSocketAddress, val initMsg: CoapMsg) {
+  class CoapClient(val stream: InOut[CoapMsg, CoapMsg], val targetAddress: InetSocketAddress, val initMsg: CoapMsg,
+                   val scheduler: Scheduler) {
 
   }
 
@@ -58,8 +60,8 @@ class CoapSessions extends BidiProcessor[Datagram, CoapSession, CoapClient, Obse
     } else {
       val session = new CoapSession(client.targetAddress, client.initMsg)
       sessions.put(client.targetAddress, session)
-      session.stream().subscribe(client.stream)
-      client.stream.subscribe(session.stream())
+      session.stream().subscribe(client.stream)(client.scheduler)
+      client.stream.subscribe(session.stream())(client.scheduler)
       PushToOutput(session.outDatagrams)
     }
   }
