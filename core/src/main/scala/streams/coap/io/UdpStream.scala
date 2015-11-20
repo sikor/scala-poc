@@ -1,4 +1,4 @@
-package streams.io
+package streams.coap.io
 
 import java.net._
 import java.nio.ByteBuffer
@@ -9,7 +9,7 @@ import monifu.reactive.Ack.{Cancel, Continue}
 import monifu.reactive.{Ack, Subscriber}
 import org.slf4j.{Logger, LoggerFactory}
 import streams.bidi.InOut
-import streams.io.UdpStream.Datagram
+import streams.coap.io.UdpStream.Datagram
 
 import scala.annotation.tailrec
 import scala.concurrent.duration._

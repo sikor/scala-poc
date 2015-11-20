@@ -4,8 +4,9 @@ import java.net.InetSocketAddress
 
 import monifu.concurrent.Implicits.globalScheduler
 import streams.AwaitableObserver
-import streams.io.UdpStream
-import streams.io.UdpStream.Datagram
+import streams.coap.io.UdpStream
+import UdpStream.Datagram
+import streams.coap.io.UdpStream
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
