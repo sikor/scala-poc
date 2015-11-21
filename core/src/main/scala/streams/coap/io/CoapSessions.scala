@@ -142,7 +142,7 @@ class CoapSessions extends BidiProcessor[Datagram, IncomingRequests, RequestExch
       newSession.client().onNext(request).onFailure {
         case t => t.printStackTrace()
       }(SameThreadExecutionContext)
-      PushToOutput(newSession.outDatagrams)
+      PushToOutput(newSession.outDatagrams) // here we should also push server side.
     }
   }
 }

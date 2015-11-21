@@ -22,23 +22,7 @@ import scala.util.Random
   * Created by Paweł Sikora.
   */
 class BidiStreamTest extends FunSuite with Matchers {
-  //
-  //  class AwaitableObserver(onNextFunc: Any => Future[Ack] = _ => Continue) extends Observer[Any] {
-  //    private val completed = Promise[Unit]
-  //
-  //    def onFinished: Future[Unit] = completed.future
-  //
-  //    def await(duration: FiniteDuration): Unit = {
-  //      // await for result to throw exception if any occurred
-  //      Await.result(onFinished, duration)
-  //    }
-  //
-  //    override def onNext(elem: Any): Future[Ack] = onNextFunc(elem)
-  //
-  //    override def onError(ex: Throwable): Unit = completed.failure(ex)
-  //
-  //    override def onComplete(): Unit = completed.success(())
-  //  }
+
 
   test("Processor functions should be called atomically") {
     val processingEvents = new ConcurrentLinkedQueue[String]()
@@ -245,21 +229,15 @@ class BidiStreamTest extends FunSuite with Matchers {
   }
 
   test("connecting observables") {
-    val channel = PublishChannel[String](Unbounded)
-    val source = channel.behavior("init")
-    source.connect()
-    channel.pushNext("dupa")
-    channel.pushNext("dupa2")
-    source.foreach(s => println(s))
-    channel.pushNext("dupa3")
-    Thread.sleep(10)
+    val obs = PublishChannel[String](Unbounded).behavior("init")
+    obs.connect()
+    obs.foreach(s => println(s))
   }
 
   test("connecting observables 2") {
-    val channel = Observable()
-    val source = channel.behavior("init")
-    source.connect()
-    source.foreach(s => println(s))
+    val obs = Observable().behavior("init")
+    obs.connect()
+    obs.foreach(s => println(s))
   }
 
 }
