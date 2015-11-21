@@ -3,11 +3,8 @@ package udp
 import java.net.InetSocketAddress
 
 import monifu.concurrent.Implicits.globalScheduler
-import streams.AwaitableObserver
-import streams.coap.io.UdpStream
-import UdpStream.Datagram
-import streams.coap.io.UdpStream
-import scala.concurrent.duration._
+import streams.coap.io.Udp
+
 import scala.language.postfixOps
 
 /**
@@ -25,15 +22,10 @@ object MonifuServer {
     } else {
       bindAddr = new InetSocketAddress(9876)
     }
-    val stream = new UdpStream(bindAddr)
-    stream.bind()
-    val obs = new AwaitableObserver((d: Datagram) => {
-      val ack = stream.onNext(d)
+    Udp(bindAddr).shortCircuit(d => {
       stats.onSent()
-      ack
+      d
     })
-    stream.subscribe(obs)
-    obs.await(1 day)
   }
 
 }
