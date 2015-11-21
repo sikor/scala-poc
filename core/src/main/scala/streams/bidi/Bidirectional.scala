@@ -2,7 +2,7 @@ package streams.bidi
 
 import monifu.concurrent.Scheduler
 import monifu.reactive.{Ack, Observable, Observer, Subscriber}
-import streams.bidi.BidirectionalSubscription.CancelObserver
+import streams.bidi.BidirectionalSubscription.CancellationObserver
 
 import scala.concurrent.Future
 import scala.util.control.NonFatal
@@ -52,7 +52,7 @@ object Bidirectional {
         try {
           f(subscription)
         } catch {
-          case NonFatal(e) => subscription.connect(new CancelObserver(subscription.scheduler)).onError(e)
+          case NonFatal(e) => subscription.connect(new CancellationObserver(subscription.scheduler)).onError(e)
         }
       }
     }

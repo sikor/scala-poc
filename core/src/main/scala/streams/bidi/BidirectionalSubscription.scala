@@ -33,7 +33,7 @@ trait BidirectionalSubscription[-I, +O] {
 
 object BidirectionalSubscription {
 
-  class CancelObserver(scheduler: Scheduler) extends Observer[Any] {
+  class CancellationObserver(scheduler: Scheduler) extends Observer[Any] {
     override def onNext(elem: Any): Future[Ack] = Cancel
 
     override def onError(ex: Throwable): Unit = scheduler.reportFailure(ex)
