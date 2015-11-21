@@ -5,6 +5,9 @@ import java.util.concurrent.ConcurrentLinkedQueue
 
 import monifu.concurrent.Implicits.globalScheduler
 import monifu.reactive.Ack.Continue
+import monifu.reactive.OverflowStrategy.Unbounded
+import monifu.reactive.channels.PublishChannel
+import monifu.reactive.subjects.PublishSubject
 import monifu.reactive.{Ack, Observable}
 import org.scalatest.{FunSuite, Matchers}
 import streams.bidi.BidiStream
@@ -239,6 +242,24 @@ class BidiStreamTest extends FunSuite with Matchers {
     outObs.await(4.second)
     inputMessages.toSet.size should be(2000)
     outputMessages.toSet.size should be(2000)
+  }
+
+  test("connecting observables") {
+    val channel = PublishChannel[String](Unbounded)
+    val source = channel.behavior("init")
+    source.connect()
+    channel.pushNext("dupa")
+    channel.pushNext("dupa2")
+    source.foreach(s => println(s))
+    channel.pushNext("dupa3")
+    Thread.sleep(10)
+  }
+
+  test("connecting observables 2") {
+    val channel = Observable()
+    val source = channel.behavior("init")
+    source.connect()
+    source.foreach(s => println(s))
   }
 
 }

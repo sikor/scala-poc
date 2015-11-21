@@ -44,7 +44,9 @@ object MonifuCoapClient {
     val time: Long = 100
     val coapStream = udp.mergeOut(BackPressure(2048)).mapInOut(new CoapSessions)
     val firstMsg = new RequestExchange(targetAddr, genMsg(), new ResendObserver(start, time, targetAddr, genMsg, coapStream))
-    coapStream.onNext(firstMsg)
+    coapStream.onNext(firstMsg).onFailure {
+      case t => t.printStackTrace()
+    }
   }
 
 }
