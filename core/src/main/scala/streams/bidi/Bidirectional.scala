@@ -1,14 +1,12 @@
 package streams.bidi
 
 import monifu.concurrent.Scheduler
-import monifu.reactive.subjects.PublishSubject
-import monifu.reactive.{Ack, Observable, Observer, Subscriber}
 import streams.bidi.BidirectionalSubscription.CancellationObserver
+import monifu.reactive.{Ack, Observable, Observer, Subscriber, _}
+import monifu.reactive.subjects.PublishSubject
 
 import scala.concurrent.Future
 import scala.util.control.NonFatal
-import monifu.reactive._
-import monifu.reactive.subjects.PublishSubject
 
 /**
   *
@@ -19,30 +17,30 @@ trait Bidirectional[+I, -O] extends Observable[I] {
 
   def onSubscribe(subscription: BidirectionalSubscription[I, O]): Unit
 
+  def onSubscribe(subscription: BidirectionalObserver[I, O])(implicit scheduler: Scheduler): Unit = {
+    onSubscribe(BidirectionalSubscription(subscription, scheduler))
+  }
+
   def onSubscribe(subscriber: Subscriber[I], observable: Observable[O]): Unit = {
-    onSubscribe(new BidirectionalSubscription[I, O] {
+    onSubscribe(new BidirectionalObserver[I, O] {
       override def connect(sink: Observer[O]): Subscriber[I] = {
         observable.onSubscribe(sink)(subscriber.scheduler)
         subscriber
       }
-
-      override implicit def scheduler: Scheduler = subscriber.scheduler
-    })
+    })(subscriber.scheduler)
   }
 
   def onSubscribe(subscriber: Subscriber[I]): Unit = onSubscribe(subscriber, Observable.empty)
 
   def shortCircuit(connector: I => O)(implicit s: Scheduler): Unit = {
-    onSubscribe(new BidirectionalSubscription[I, O] {
+    onSubscribe(new BidirectionalObserver[I, O] {
       override def connect(subscriber: Observer[O]): Observer[I] = new Observer[I] {
-        override def onError(ex: Throwable): Unit = scheduler.reportFailure(ex)
+        override def onError(ex: Throwable): Unit = s.reportFailure(ex)
 
         override def onComplete(): Unit = subscriber.onComplete()
 
         override def onNext(elem: I): Future[Ack] = subscriber.onNext(connector(elem))
       }
-
-      override implicit def scheduler: Scheduler = s
     })
   }
 
@@ -73,8 +71,7 @@ object Bidirectional {
 
   def map[I, O, I2, O2](source: Bidirectional[I, O])(fin: I => I2, fout: O2 => O): Bidirectional[I2, O2] = {
     Bidirectional.create[I2, O2] { subscription =>
-      source.onSubscribe(new BidirectionalSubscription[I, O] {
-        override implicit def scheduler: Scheduler = subscription.scheduler
+      source.onSubscribe(new BidirectionalObserver[I, O] {
 
         override def connect(onSubscribe: Observer[O]): Observer[I] = {
           val underlying = subscription.connect(new Observer[O2] {
@@ -92,21 +89,20 @@ object Bidirectional {
             override def onNext(elem: I): Future[Ack] = underlying.onNext(fin(elem))
           }
         }
-      })
+      })(subscription.scheduler)
     }
   }
 
   def unMergeOut[I, O](source: Bidirectional[I, O])(overflowStrategy: OverflowStrategy): Bidirectional[I, Observable[O]] = {
     Bidirectional.create[I, Observable[O]] { subscription =>
-      source.onSubscribe(new BidirectionalSubscription[I, O] {
-        override implicit def scheduler: Scheduler = subscription.scheduler
+      source.onSubscribe(new BidirectionalObserver[I, O] {
 
         override def connect(sink: Observer[O]): Observer[I] = {
           val transformation = PublishSubject[Observable[O]]()
           transformation.merge(overflowStrategy).onSubscribe(sink)(subscription.scheduler)
           subscription.connect(transformation)
         }
-      })
+      })(subscription.scheduler)
     }
   }
 }

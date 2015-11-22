@@ -1,11 +1,11 @@
 package streams.coap.io
 
-import monifu.concurrent.Scheduler
 import monifu.reactive.Ack.Continue
 import monifu.reactive.OverflowStrategy.BackPressure
 import monifu.reactive.observers.BufferedSubscriber
 import monifu.reactive.{Ack, Observer, Subscriber}
-import streams.bidi.{BidirectionalSubscription, Bidirectional}
+import streams.SameThreadExecutionContext
+import streams.bidi.{Bidirectional, BidirectionalObserver}
 import streams.coap.core.message.CoapMessage.IsRequest
 import streams.coap.core.{CoapEnvelope, CoapMessageProcessor, IncomingMessageEnvelope, OutgoingEnvelope}
 
@@ -21,15 +21,13 @@ object CoapMatcher {
 
   def apply(source: Bidirectional[IncomingMessageEnvelope, CoapEnvelope]): Bidirectional[CoapServer, OutgoingEnvelopeT] = {
     Bidirectional.create[CoapServer, OutgoingEnvelopeT] { subscription =>
-      source.onSubscribe(new BidirectionalSubscription[IncomingMessageEnvelope, CoapEnvelope] {
-
-        override implicit def scheduler: Scheduler = subscription.scheduler
+      source.onSubscribe(new BidirectionalObserver[IncomingMessageEnvelope, CoapEnvelope] {
 
         override def connect(messagesSink: Observer[CoapEnvelope]): Observer[IncomingMessageEnvelope] = {
           val safeSink = messagesSink match {
             case b: BufferedSubscriber[CoapEnvelope] => b
             case _ => println("wraping subscirber")
-              BufferedSubscriber(Subscriber(messagesSink, scheduler), BackPressure(2048))
+              BufferedSubscriber(Subscriber(messagesSink, subscription.scheduler), BackPressure(2048))
           }
           val processor = new CoapMessageProcessor[Observer[IncomingMessageEnvelope]]()
           // Source 1
@@ -39,7 +37,7 @@ object CoapMatcher {
               safeSink.onNext(elem)
             }
 
-            override def onError(ex: Throwable): Unit = scheduler.reportFailure(ex)
+            override def onError(ex: Throwable): Unit = subscription.scheduler.reportFailure(ex)
 
             override def onComplete(): Unit = println("completed")
           }
@@ -47,7 +45,7 @@ object CoapMatcher {
 
           // Source 2
           val incomingMessages = new Observer[IncomingMessageEnvelope] {
-            override def onError(ex: Throwable): Unit = scheduler.reportFailure(ex)
+            override def onError(ex: Throwable): Unit = subscription.scheduler.reportFailure(ex)
 
             override def onComplete(): Unit = println("completed")
 
@@ -59,12 +57,13 @@ object CoapMatcher {
                 case IsRequest(r) => requestsObserver.onNext(elem)
                 case _ => Continue
               }
+              implicit val ec = SameThreadExecutionContext
               ansFut.getOrElse(Continue).flatMap(_ => cbfut.getOrElse(Continue)).flatMap(_ => reqFut)
             }
           }
           incomingMessages
         }
-      })
+      })(subscription.scheduler)
     }
   }
 }

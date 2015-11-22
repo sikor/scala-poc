@@ -17,21 +17,23 @@ import scala.concurrent.Future
   * @tparam I message we consume
   * @tparam O message we produce
   */
-trait BidirectionalSubscription[-I, +O] {
+trait BidirectionalSubscription[-I, +O] extends BidirectionalObserver[I, O] {
 
   implicit def scheduler: Scheduler
-
-  /**
-    *
-    * @param output this is the subscriber to our internal Observable.
-    * @return return our subscriber
-    */
-  def connect(output: Observer[O]): Observer[I]
-
-
 }
 
+
 object BidirectionalSubscription {
+
+  class BidiObserverWrapper[I, O](val obs: BidirectionalObserver[I, O], val s: Scheduler) extends BidirectionalSubscription[I, O] {
+    override implicit def scheduler: Scheduler = s
+
+    override def connect(output: Observer[O]): Observer[I] = obs.connect(output)
+  }
+
+  def apply[I, O](observer: BidirectionalObserver[I, O], scheduler: Scheduler): BidirectionalSubscription[I, O] = {
+    new BidiObserverWrapper[I, O](observer, scheduler)
+  }
 
   class CancellationObserver(scheduler: Scheduler) extends Observer[Any] {
     override def onNext(elem: Any): Future[Ack] = Cancel
