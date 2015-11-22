@@ -87,7 +87,7 @@ object Udp {
       // close socket after subscriber and observable are finished
       implicit val ec = SameThreadExecutionContext
       sender.whenTerminated.onComplete(
-        t => receiver.whenTerminated.onComplete(t2 => socket.close())
+        _ => receiver.whenTerminated.onComplete(_ => socket.close())
       )
       sender.whenTerminated.onFailure {
         case NonFatal(e) => subscription.scheduler.reportFailure(e)

@@ -23,10 +23,10 @@ trait BidirectionalSubscription[-I, +O] {
 
   /**
     *
-    * @param onSubscribe this is the subscriber to our internal Observable.
+    * @param output this is the subscriber to our internal Observable.
     * @return return our subscriber
     */
-  def connect(onSubscribe: Observer[O]): Observer[I]
+  def connect(output: Observer[O]): Observer[I]
 
 
 }
