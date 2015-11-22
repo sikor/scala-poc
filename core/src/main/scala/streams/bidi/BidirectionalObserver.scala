@@ -11,12 +11,6 @@ import monifu.reactive.Observer
   */
 trait BidirectionalObserver[-I, +O] {
 
-  /**
-    *
-    * @param output this is the subscriber to our internal Observable.
-    * @return return our subscriber
-    */
   def connect(output: Observer[O]): Observer[I]
-
 
 }

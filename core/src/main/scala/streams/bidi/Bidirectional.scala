@@ -37,12 +37,12 @@ trait Bidirectional[+I, -O] extends Observable[I] {
 
   def shortCircuit(connector: I => O)(implicit s: Scheduler): Unit = {
     onSubscribe(new BidirectionalObserver[I, O] {
-      override def connect(subscriber: Observer[O]): Observer[I] = new Observer[I] {
+      override def connect(sink: Observer[O]): Observer[I] = new Observer[I] {
         override def onError(ex: Throwable): Unit = s.reportFailure(ex)
 
-        override def onComplete(): Unit = subscriber.onComplete()
+        override def onComplete(): Unit = sink.onComplete()
 
-        override def onNext(elem: I): Future[Ack] = subscriber.onNext(connector(elem))
+        override def onNext(elem: I): Future[Ack] = sink.onNext(connector(elem))
       }
     })
   }
@@ -55,6 +55,14 @@ trait Bidirectional[+I, -O] extends Observable[I] {
     CoapMatcher(this)
   }
 
+  def write(writer: Observable[O])(implicit s: Scheduler) = {
+    onSubscribe(new BidirectionalObserver[I, O] {
+      override def connect(output: Observer[O]): Observer[I] = {
+        writer.onSubscribe(output)
+        new CancellationObserver(s)
+      }
+    })
+  }
 
 }
 
@@ -83,13 +91,13 @@ object Bidirectional {
   def map[I, O, I2, O2](source: Bidirectional[I, O])(fin: I => I2, fout: O2 => O): Bidirectional[I2, O2] = {
     Bidirectional.create[I2, O2] { subscription =>
       source.onSubscribe(new BidirectionalObserver[I, O] {
-        override def connect(onSubscribe: Observer[O]): Observer[I] = {
+        override def connect(sink: Observer[O]): Observer[I] = {
           val underlying = subscription.connect(new Observer[O2] {
-            override def onError(ex: Throwable): Unit = onSubscribe.onError(ex)
+            override def onError(ex: Throwable): Unit = sink.onError(ex)
 
-            override def onComplete(): Unit = onSubscribe.onComplete()
+            override def onComplete(): Unit = sink.onComplete()
 
-            override def onNext(elem: O2): Future[Ack] = onSubscribe.onNext(fout(elem))
+            override def onNext(elem: O2): Future[Ack] = sink.onNext(fout(elem))
           })
           new Observer[I] {
             override def onError(ex: Throwable): Unit = underlying.onError(ex)

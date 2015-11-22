@@ -1,14 +1,9 @@
 package udp
 
 import java.net.InetSocketAddress
-import java.nio.ByteBuffer
-import java.nio.charset.Charset
 
 import monifu.concurrent.Implicits.globalScheduler
-import streams.coap.core.{NonListenableMessageEnvelope, CoapEnvelope, IncomingMessageEnvelope}
-import streams.coap.core.message._
 import streams.coap.io.Udp
-import streams.coap.io.Udp.Datagram
 
 import scala.language.postfixOps
 
@@ -27,15 +22,9 @@ object MonifuServer {
     } else {
       bindAddr = new InetSocketAddress(9876)
     }
-    val payload: Payload = Payload("hi!".getBytes(Charset.forName("UTF-8")))
-    Udp(bindAddr)
-      .map(
-        d => IncomingMessageEnvelope(MessageParser.parse(d.data.array()), d.address),
-        (e: CoapEnvelope) => Datagram(ByteBuffer.wrap(MessageSerializer.serialize(e.message)), e.address))
-      .coapMatcher.shortCircuit(in => {
-      NonListenableMessageEnvelope(
-        CoapMessage(Acknowledgement, Content, in.message.messageId, in.message.token, Options.empty, payload),
-        in.address)
+    Udp(bindAddr).shortCircuit(d => {
+      stats.onSent()
+      d
     })
   }
 

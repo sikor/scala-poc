@@ -1,42 +1,89 @@
 package udp
 
-import java.net.InetSocketAddress
+import java.net.{InetAddress, InetSocketAddress}
 import java.nio.ByteBuffer
 import java.nio.charset.Charset
+import java.util.concurrent.{ThreadFactory, Executors}
 
-import monifu.concurrent.Implicits.globalScheduler
+import monifu.concurrent.{UncaughtExceptionReporter, Scheduler}
+import monifu.concurrent.schedulers.AsyncScheduler
+import monifu.reactive.{Ack, Observable, Observer}
+import streams.SameThreadExecutionContext
+import streams.coap.core._
 import streams.coap.core.message._
-import streams.coap.core.{CoapEnvelope, IncomingMessageEnvelope, NonListenableMessageEnvelope}
 import streams.coap.io.Udp
 import streams.coap.io.Udp.Datagram
 
+import scala.concurrent.{ExecutionContext, Promise, Future}
 import scala.language.postfixOps
+import scala.util.{Failure, Success}
 
-/**
-  * Localhost: 380k req p second
-  * Remote: 400k req p second
-  */
+
 object CoapClient {
+
+  val globalScheduler: Scheduler =
+    AsyncScheduler(
+      Executors.newSingleThreadScheduledExecutor(new ThreadFactory {
+        def newThread(r: Runnable): Thread = {
+          val th = new Thread(r)
+          th.setDaemon(true)
+          th.setName("benchmark-scheduler")
+          th
+        }
+      }),
+      ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1, new ThreadFactory {
+        override def newThread(r: Runnable): Thread = {
+          val th = new Thread(r)
+          th.setDaemon(true)
+          th.setName("benchmark-executor")
+          th
+        }
+      })),
+      UncaughtExceptionReporter.LogExceptionsToStandardErr
+    )
 
   private val stats: Statistics = new Statistics
 
   def main(args: Array[String]): Unit = {
-    var bindAddr: InetSocketAddress = null
+    var targetAddress: InetSocketAddress = null
     if (args.length == 2) {
-      bindAddr = new InetSocketAddress(args(0), Integer.valueOf(args(1)))
+      targetAddress = new InetSocketAddress(args(0), Integer.valueOf(args(1)))
     } else {
-      bindAddr = new InetSocketAddress(9876)
+      targetAddress = new InetSocketAddress(InetAddress.getByName("localhost"), 9876)
     }
+    val coapProcessor = new CoapMessageProcessor[Any]()
     val payload: Payload = Payload("hi!".getBytes(Charset.forName("UTF-8")))
-    Udp(bindAddr)
-      .map(
-        d => IncomingMessageEnvelope(MessageParser.parse(d.data.array()), d.address),
-        (e: CoapEnvelope) => Datagram(ByteBuffer.wrap(MessageSerializer.serialize(e.message)), e.address))
-      .coapMatcher.shortCircuit(in => {
-      NonListenableMessageEnvelope(
-        CoapMessage(Acknowledgement, Content, in.message.messageId, in.message.token, Options.empty, payload),
-        in.address)
-    })
+    def msg() = CoapMessage(Confirmable, Get, coapProcessor.generateMid(targetAddress),
+      coapProcessor.generateTid(targetAddress), Options.empty, payload)
+    Udp(new InetSocketAddress(0)).map(
+      d => IncomingMessageEnvelope(MessageParser.parse(d.data.array()), d.address),
+      (e: CoapEnvelope) => Datagram(ByteBuffer.wrap(MessageSerializer.serialize(e.message)), e.address))
+      .coapMatcher.write(Observable.create { subscriber =>
+      def send(): Unit = {
+        val ansPromise = Promise[IncomingMessageEnvelope]
+        val observer = new Observer[IncomingMessageEnvelope] {
+          override def onError(ex: Throwable): Unit = ex.printStackTrace()
+
+          override def onComplete(): Unit = {}
+
+          override def onNext(elem: IncomingMessageEnvelope): Future[Ack] = {
+            stats.onSent()
+            ansPromise.success(elem)
+            Ack.Continue
+          }
+        }
+        val ack = subscriber.onNext(ListenableEnvelope(msg(), targetAddress, observer))
+        ack.flatMap {
+          case Ack.Continue => ansPromise.future
+          case _ => throw new IllegalArgumentException
+        }(SameThreadExecutionContext).onComplete {
+          case Success(ans) => send()
+          case Failure(ex) => ex.printStackTrace()
+        }(SameThreadExecutionContext)
+      }
+      send()
+    })(globalScheduler)
+
   }
 
 }

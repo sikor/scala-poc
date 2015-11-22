@@ -51,14 +51,18 @@ object CoapMatcher {
 
             override def onNext(elem: I): Future[Ack] = {
               val result = processor.receive(elem)
-              val ansFut = result.answer.map(ans => safeSink.onNext(ans))
-              val cbfut = result.matchedEnvelope.map(env => env.exchange.onNext(elem))
+              val ansFut = result.answer.map(ans => safeSink.onNext(ans)).getOrElse(Continue)
+              val cbfut = result.matchedEnvelope.map(env => env.exchange.onNext(elem)).getOrElse(Continue)
               val reqFut = elem.message match {
                 case IsRequest(r) => requestsObserver.onNext(elem)
                 case _ => Continue
               }
-              implicit val ec = SameThreadExecutionContext
-              ansFut.getOrElse(Continue).flatMap(_ => cbfut.getOrElse(Continue)).flatMap(_ => reqFut)
+              if (ansFut == Continue && cbfut == Continue && reqFut == Continue) {
+                Continue
+              } else {
+                implicit val ec = SameThreadExecutionContext
+                ansFut.flatMap(_ => cbfut).flatMap(_ => reqFut)
+              }
             }
           }
           incomingMessages
