@@ -4,8 +4,10 @@ import java.net._
 import java.nio.ByteBuffer
 import java.util.concurrent.{LinkedBlockingQueue, TimeUnit}
 
+import monifu.concurrent.Scheduler
 import monifu.concurrent.atomic.Atomic
 import monifu.reactive.Ack.{Cancel, Continue}
+import monifu.reactive.observers.BufferedSubscriber
 import monifu.reactive.{Ack, Observer}
 import streams.SameThreadExecutionContext
 import streams.bidi.Bidirectional
@@ -44,7 +46,8 @@ object Udp {
       })
       val senderThread = new Thread(sender)
       senderThread.start()
-      val subscriber = subscription.connect(new Observer[Datagram] {
+      //We can handle concurrent onNext so use BufferedSubscriber
+      val subscriber = subscription.connect(new BufferedSubscriber[Datagram] {
         override def onNext(elem: Datagram): Future[Ack] = {
           outgoingMessages.add(elem)
           Continue
@@ -58,6 +61,8 @@ object Udp {
         override def onComplete(): Unit = {
           continueWhenQueueIsEmpty.set(false)
         }
+
+        override implicit def scheduler: Scheduler = subscription.scheduler
       })
 
       //now when we have subscriber we can start receiving

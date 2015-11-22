@@ -1,5 +1,8 @@
 package streams.bidi
 
+import _root_.streams.coap.core.{CoapEnvelope, IncomingMessageEnvelope}
+import _root_.streams.coap.io.CoapMatcher
+import _root_.streams.coap.io.CoapMatcher.{IncomingEnvelopeT, OutgoingEnvelopeT}
 import monifu.concurrent.Scheduler
 import streams.bidi.BidirectionalSubscription.CancellationObserver
 import monifu.reactive.{Ack, Observable, Observer, Subscriber, _}
@@ -44,6 +47,14 @@ trait Bidirectional[+I, -O] extends Observable[I] {
     })
   }
 
+  def map[I2, O2](fin: I => I2, fout: O2 => O): Bidirectional[I2, O2] = {
+    Bidirectional.map(this)(fin, fout)
+  }
+
+  def coapMatcher(implicit ev: I <:< IncomingMessageEnvelope, ev2: CoapEnvelope <:< O): Bidirectional[IncomingEnvelopeT, OutgoingEnvelopeT] = {
+    CoapMatcher(this)
+  }
+
 
 }
 
@@ -72,7 +83,6 @@ object Bidirectional {
   def map[I, O, I2, O2](source: Bidirectional[I, O])(fin: I => I2, fout: O2 => O): Bidirectional[I2, O2] = {
     Bidirectional.create[I2, O2] { subscription =>
       source.onSubscribe(new BidirectionalObserver[I, O] {
-
         override def connect(onSubscribe: Observer[O]): Observer[I] = {
           val underlying = subscription.connect(new Observer[O2] {
             override def onError(ex: Throwable): Unit = onSubscribe.onError(ex)

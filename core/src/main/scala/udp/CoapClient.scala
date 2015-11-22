@@ -5,8 +5,8 @@ import java.nio.ByteBuffer
 import java.nio.charset.Charset
 
 import monifu.concurrent.Implicits.globalScheduler
-import streams.coap.core.{NonListenableMessageEnvelope, CoapEnvelope, IncomingMessageEnvelope}
 import streams.coap.core.message._
+import streams.coap.core.{CoapEnvelope, IncomingMessageEnvelope, NonListenableMessageEnvelope}
 import streams.coap.io.Udp
 import streams.coap.io.Udp.Datagram
 
@@ -16,7 +16,7 @@ import scala.language.postfixOps
   * Localhost: 380k req p second
   * Remote: 400k req p second
   */
-object MonifuServer {
+object CoapClient {
 
   private val stats: Statistics = new Statistics
 
