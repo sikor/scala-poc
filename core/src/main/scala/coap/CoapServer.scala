@@ -17,8 +17,7 @@ import scala.concurrent.ExecutionContext
 import scala.language.postfixOps
 
 /**
-  * Localhost: 380k req p second
-  * Remote: 400k req p second
+  * 80k req p seconds localhost
   */
 object CoapServer {
 
