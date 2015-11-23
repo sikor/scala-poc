@@ -8,11 +8,10 @@ import java.util.concurrent.{ThreadFactory, Executors}
 import monifu.concurrent.{UncaughtExceptionReporter, Scheduler}
 import monifu.concurrent.schedulers.AsyncScheduler
 import monifu.reactive.{Ack, Observable, Observer}
-import streams.SameThreadExecutionContext
+import streams.{Udp, SameThreadExecutionContext}
 import streams.coap.core._
 import streams.coap.core.message._
-import streams.coap.io.Udp
-import streams.coap.io.Udp.Datagram
+import Udp.Datagram
 
 import scala.concurrent.{ExecutionContext, Promise, Future}
 import scala.language.postfixOps

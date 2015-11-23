@@ -1,8 +1,8 @@
 package streams.bidi
 
+import _root_.streams.CoapMatcher
 import _root_.streams.coap.core.{CoapEnvelope, IncomingMessageEnvelope}
-import _root_.streams.coap.io.CoapMatcher
-import _root_.streams.coap.io.CoapMatcher.{IncomingEnvelopeT, OutgoingEnvelopeT}
+import CoapMatcher.{IncomingEnvelopeT, OutgoingEnvelopeT}
 import monifu.concurrent.Scheduler
 import streams.bidi.BidirectionalSubscription.CancellationObserver
 import monifu.reactive.{Ack, Observable, Observer, Subscriber, _}

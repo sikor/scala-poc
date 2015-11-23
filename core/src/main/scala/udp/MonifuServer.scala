@@ -3,7 +3,7 @@ package udp
 import java.net.InetSocketAddress
 
 import monifu.concurrent.Implicits.globalScheduler
-import streams.coap.io.Udp
+import streams.Udp
 
 import scala.language.postfixOps
 

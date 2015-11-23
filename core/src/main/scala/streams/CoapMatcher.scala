@@ -1,10 +1,9 @@
-package streams.coap.io
+package streams
 
 import monifu.reactive.Ack.Continue
 import monifu.reactive.OverflowStrategy.BackPressure
 import monifu.reactive.observers.BufferedSubscriber
 import monifu.reactive.{Ack, Observer, Subscriber}
-import streams.SameThreadExecutionContext
 import streams.bidi.{Bidirectional, BidirectionalObserver}
 import streams.coap.core.message.CoapMessage.IsRequest
 import streams.coap.core.{CoapEnvelope, CoapMessageProcessor, IncomingMessageEnvelope, OutgoingEnvelope}

@@ -1,4 +1,4 @@
-package streams.coap.io
+package streams
 
 import java.net._
 import java.nio.ByteBuffer
@@ -6,10 +6,9 @@ import java.util.concurrent.{LinkedBlockingQueue, TimeUnit}
 
 import monifu.concurrent.Scheduler
 import monifu.concurrent.atomic.Atomic
+import monifu.reactive.Ack
 import monifu.reactive.Ack.{Cancel, Continue}
 import monifu.reactive.observers.BufferedSubscriber
-import monifu.reactive.{Ack, Observer}
-import streams.SameThreadExecutionContext
 import streams.bidi.Bidirectional
 
 import scala.concurrent.duration._
