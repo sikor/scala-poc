@@ -1,4 +1,4 @@
-package streams
+package benchmarks
 
 import java.util.concurrent.{Executors, ThreadFactory}
 
@@ -7,7 +7,8 @@ import monifu.concurrent.{Scheduler, UncaughtExceptionReporter}
 import monifu.reactive.Ack.Continue
 import monifu.reactive.{Ack, Observable}
 import streams.bidi.BidiStream
-import BidiStream.{ProcessingAction, PushToInput, PushToOutput}
+import streams.bidi.BidiStream.{ProcessingAction, PushToInput, PushToOutput}
+import streams.AwaitableObserverAny
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future, Promise}

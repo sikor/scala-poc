@@ -1,4 +1,4 @@
-package streams
+package benchmarks
 
 /**
   * @author Paweł Sikora

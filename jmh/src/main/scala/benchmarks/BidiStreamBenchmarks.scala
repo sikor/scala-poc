@@ -9,7 +9,7 @@ import monifu.reactive.{Ack, Observable}
 import org.openjdk.jmh.annotations._
 import streams.bidi.BidiStream
 import BidiStream.{ProcessingAction, _}
-import streams.MergeAndGroupByBidi._
+import MergeAndGroupByBidi._
 import streams._
 
 import scala.concurrent.duration._
