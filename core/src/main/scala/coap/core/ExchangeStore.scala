@@ -1,9 +1,9 @@
-package streams.coap.core
+package coap.core
 
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
 
-import streams.coap.core.message.{Token, MessageId}
+import coap.core.message.{Token, MessageId}
 
 /**
   * @author pawel

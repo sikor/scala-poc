@@ -1,16 +1,17 @@
-package udp
+package coap
 
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.charset.Charset
-import java.util.concurrent.{ThreadFactory, Executors}
+import java.util.concurrent.{Executors, ThreadFactory}
 
-import monifu.concurrent.{UncaughtExceptionReporter, Scheduler}
+import coap.core.message._
+import coap.core.{CoapEnvelope, IncomingMessageEnvelope, NonListenableMessageEnvelope}
 import monifu.concurrent.schedulers.AsyncScheduler
+import monifu.concurrent.{Scheduler, UncaughtExceptionReporter}
 import streams.Udp
-import streams.coap.core.message._
-import streams.coap.core.{CoapEnvelope, IncomingMessageEnvelope, NonListenableMessageEnvelope}
-import Udp.Datagram
+import streams.Udp.Datagram
+import udp.Statistics
 
 import scala.concurrent.ExecutionContext
 import scala.language.postfixOps

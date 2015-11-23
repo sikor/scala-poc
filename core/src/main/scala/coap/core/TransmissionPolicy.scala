@@ -1,4 +1,4 @@
-package streams.coap.core
+package coap.core
 
 import java.util.concurrent.TimeUnit
 

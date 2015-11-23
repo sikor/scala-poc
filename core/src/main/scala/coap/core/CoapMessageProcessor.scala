@@ -1,11 +1,11 @@
-package streams.coap.core
+package coap.core
 
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
-import streams.coap.core.message.CoapMessage._
-import streams.coap.core.message._
+import coap.core.message.CoapMessage._
+import coap.core.message._
 
 /**
   * Coap problems:

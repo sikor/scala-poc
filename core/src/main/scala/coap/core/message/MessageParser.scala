@@ -1,7 +1,7 @@
-package streams.coap.core.message
+package coap.core.message
 
 import org.eclipse.californium.core.network.serialization.DatagramReader
-import streams.coap.core.message.CoapMessage.AnyCoapMessage
+import coap.core.message.CoapMessage.AnyCoapMessage
 
 import scala.collection.immutable.SortedMap
 

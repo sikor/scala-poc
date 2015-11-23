@@ -1,8 +1,8 @@
-package streams.coap.core
+package coap.core
 
 import java.net.InetSocketAddress
 
-import streams.coap.core.message.CoapMessage.AnyCoapMessage
+import coap.core.message.CoapMessage.AnyCoapMessage
 
 /**
   * @author pawel

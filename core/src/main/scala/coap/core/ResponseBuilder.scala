@@ -1,9 +1,9 @@
-package streams.coap.core
+package coap.core
 
 import java.net.InetSocketAddress
 
-import streams.coap.core.message.CoapMessage.{AnyCoapMessage, NonconfirmableRequest, ConfirmableRequest}
-import streams.coap.core.message._
+import coap.core.message.CoapMessage.{AnyCoapMessage, NonconfirmableRequest, ConfirmableRequest}
+import coap.core.message._
 
 /**
   * @author pawel

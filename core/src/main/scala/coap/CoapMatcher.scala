@@ -1,12 +1,13 @@
-package streams
+package coap
 
+import coap.core.message.CoapMessage.IsRequest
+import coap.core.{CoapEnvelope, CoapMessageProcessor, IncomingMessageEnvelope, OutgoingEnvelope}
 import monifu.reactive.Ack.Continue
 import monifu.reactive.OverflowStrategy.BackPressure
 import monifu.reactive.observers.BufferedSubscriber
 import monifu.reactive.{Ack, Observer, Subscriber}
+import streams.SameThreadExecutionContext
 import streams.bidi.{Bidirectional, BidirectionalObserver}
-import streams.coap.core.message.CoapMessage.IsRequest
-import streams.coap.core.{CoapEnvelope, CoapMessageProcessor, IncomingMessageEnvelope, OutgoingEnvelope}
 
 import scala.concurrent.Future
 

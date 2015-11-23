@@ -1,4 +1,4 @@
-package streams.coap.core.message
+package coap.core.message
 
 /**
   * @author pawel
